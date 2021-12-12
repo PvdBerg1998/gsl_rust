@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 fn main() {
     let out = cmake::Config::new(std::fs::canonicalize("./gsl").unwrap())
         .define("NO_AMPL_BINDINGS", "")
@@ -20,14 +18,19 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg(format!("-I{}", headers.display()))
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .blocklist_item("FP_.*")
+        .blocklist_item(".*long_double.*")
+        .allowlist_function("gsl.*")
+        .allowlist_type("gsl.*")
+        .allowlist_var("gsl.*")
+        .allowlist_function("GSL.*")
+        .allowlist_type("GSL.*")
+        .allowlist_var("GSL.*")
         .generate()
         .expect("Unable to generate bindings");
 
-    let out_path = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file("bindings.rs")
         .expect("Couldn't write bindings!");
 }
