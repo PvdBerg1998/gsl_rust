@@ -1,4 +1,3 @@
-use approx::assert_abs_diff_eq;
 use std::os::raw::*;
 
 mod bindings {
@@ -14,8 +13,112 @@ use bindings::*;
 
 type Result<T> = std::result::Result<T, GSLError>;
 
+pub fn trust_region_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
+    max_iter: usize,
+    xtol: f64,
+    gtol: f64,
+    ftol: f64,
+    p0: [f64; P],
+    data: &[(f64, f64)],
+    f: F,
+) -> Result<[f64; P]> {
+    unsafe {
+        // Define fit method and parameters
+        let fit_type = gsl_multifit_nlinear_trust;
+        let fit_params = gsl_multifit_nlinear_default_parameters();
+
+        // Amount of datapoints
+        let n = data.len() as u64;
+
+        // Allocate workspace
+        let workspace = gsl_multifit_nlinear_alloc(
+            fit_type,
+            &fit_params as *const _,
+            n,        // amount of datapoints
+            P as u64, // amount of parameters
+        );
+        assert!(!workspace.is_null());
+
+        // Initial parameter guess
+        let param_guess = gsl_vector_alloc(P as u64);
+        assert!(!param_guess.is_null());
+        for (i, &p) in p0.iter().enumerate() {
+            gsl_vector_set(param_guess, i as u64, p);
+        }
+
+        // Information we need inside fit_f
+        let ffi_params = (f, data);
+
+        // Function to be optimized
+        let mut fdf = gsl_multifit_function_fdf_struct {
+            f: Some(fit_f::<F, P>),
+            df: None,
+            fdf: None,
+            n,
+            p: P as u64,
+            params: &ffi_params as *const _ as *mut c_void,
+            nevalf: 0,
+            nevaldf: 0,
+        };
+
+        unsafe extern "C" fn fit_f<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
+            params: *const gsl_vector,
+            ffi_params: *mut c_void,
+            out: *mut gsl_vector,
+        ) -> i32 {
+            let mut param_cache = [0.0; P];
+            for i in 0..P {
+                param_cache[i] = gsl_vector_get(params, i as u64);
+            }
+
+            let (f, data): &(F, &[(f64, f64)]) = &*(ffi_params as *const _);
+
+            for (i, &(x, y)) in data.iter().enumerate() {
+                let err = y - match f(x, param_cache) {
+                    Ok(y) => y,
+                    Err(e) => return e.into(),
+                };
+                gsl_vector_set(out, i as u64, err);
+            }
+
+            GSL_SUCCESS
+        }
+
+        // Init workspace
+        gsl_multifit_nlinear_init(
+            param_guess,
+            &mut fdf as *mut _ as *mut gsl_multifit_nlinear_fdf,
+            workspace,
+        );
+
+        let mut _info = 0i32;
+        let status = gsl_multifit_nlinear_driver(
+            max_iter as u64,
+            xtol,
+            gtol,
+            ftol,
+            None,
+            std::ptr::null_mut(),
+            &mut _info as *mut _,
+            workspace,
+        );
+
+        let mut param_cache = [0.0; P];
+        for i in 0..P {
+            param_cache[i] = gsl_vector_get((*workspace).x, i as u64);
+        }
+        // todo other statistics
+
+        gsl_multifit_nlinear_free(workspace);
+        gsl_vector_free(param_guess);
+
+        GSLError::from_raw(status)?;
+        Ok(param_cache)
+    }
+}
+
 pub fn qag_gk61<F: Fn(f64) -> f64>(
-    workspace_size: u64,
+    workspace_size: usize,
     a: f64,
     b: f64,
     epsabs: f64,
@@ -23,7 +126,7 @@ pub fn qag_gk61<F: Fn(f64) -> f64>(
     f: F,
 ) -> Result<f64> {
     unsafe {
-        let workspace = gsl_integration_workspace_alloc(workspace_size);
+        let workspace = gsl_integration_workspace_alloc(workspace_size as u64);
         assert!(!workspace.is_null());
 
         let gsl_f = gsl_function_struct {
@@ -40,7 +143,7 @@ pub fn qag_gk61<F: Fn(f64) -> f64>(
             b,
             epsabs,
             epsrel,
-            workspace_size,
+            workspace_size as u64,
             GSL_INTEG_GAUSS61 as c_int,
             workspace,
             &mut result as *mut _,
@@ -56,7 +159,7 @@ pub fn qag_gk61<F: Fn(f64) -> f64>(
 
 #[test]
 fn test_qag65() {
-    assert_abs_diff_eq!(
+    approx::assert_abs_diff_eq!(
         qag_gk61(4, 0.0, 1.0, 1.0e-6, 0.0, |x| x.powi(3) + x).unwrap(),
         0.75
     );
