@@ -1,0 +1,10 @@
+[package]
+name = "gsl_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.59.2"
+cmake = "0.1"
