@@ -11,7 +11,7 @@ mod bindings {
 }
 use bindings::*;
 
-type Result<T> = std::result::Result<T, GSLError>;
+pub type Result<T> = std::result::Result<T, GSLError>;
 
 pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
     max_iter: usize,
