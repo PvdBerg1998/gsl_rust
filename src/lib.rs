@@ -13,7 +13,7 @@ use bindings::*;
 
 type Result<T> = std::result::Result<T, GSLError>;
 
-pub fn trust_region_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
+pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
     max_iter: usize,
     xtol: f64,
     gtol: f64,
@@ -117,6 +117,42 @@ pub fn trust_region_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
     }
 }
 
+#[test]
+fn test_fit() {
+    for i in 0..10 {
+        fn model(a: f64, b: f64, x: f64) -> f64 {
+            a + b * x + (a * b) * x.powi(2)
+        }
+
+        let a = 10.0 + i as f64;
+        let b = i as f64;
+
+        let data = (0..1000)
+            .map(|x| x as f64 / 100.0)
+            .map(|x| (x, model(a, b, x)))
+            .collect::<Vec<_>>();
+
+        let fit_params = nonlinear_fit(
+            1000,
+            1.0e-9,
+            1.0e-9,
+            1.0e-9,
+            [10.0, 5.0],
+            &data,
+            |x, params| {
+                let a = params[0];
+                let b = params[1];
+
+                Ok(model(a, b, x))
+            },
+        )
+        .unwrap();
+
+        approx::assert_abs_diff_eq!(fit_params[0], a, epsilon = 1.0e-3);
+        approx::assert_abs_diff_eq!(fit_params[1], b, epsilon = 1.0e-3);
+    }
+}
+
 pub fn qag_gk61<F: Fn(f64) -> f64>(
     workspace_size: usize,
     a: f64,
@@ -161,7 +197,8 @@ pub fn qag_gk61<F: Fn(f64) -> f64>(
 fn test_qag65() {
     approx::assert_abs_diff_eq!(
         qag_gk61(4, 0.0, 1.0, 1.0e-6, 0.0, |x| x.powi(3) + x).unwrap(),
-        0.75
+        0.75,
+        epsilon = 1.0e-6
     );
 }
 
