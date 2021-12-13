@@ -1,4 +1,5 @@
 use std::os::raw::*;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 mod bindings {
     #![allow(dead_code)]
@@ -13,7 +14,11 @@ use bindings::*;
 
 pub type Result<T> = std::result::Result<T, GSLError>;
 
-pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
+pub fn nonlinear_fit<
+    F: Fn(f64, [f64; P]) -> Result<f64>,
+    J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+    const P: usize,
+>(
     max_iter: usize,
     xtol: f64,
     gtol: f64,
@@ -21,6 +26,7 @@ pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
     p0: [f64; P],
     data: &[(f64, f64)],
     f: F,
+    j: J,
 ) -> Result<[f64; P]> {
     unsafe {
         // Define fit method and parameters
@@ -46,13 +52,13 @@ pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
             gsl_vector_set(param_guess, i as u64, p);
         }
 
-        // Information we need inside fit_f
-        let ffi_params = (f, data);
+        // Information we need inside the trampolines
+        let ffi_params = (f, j, data);
 
         // Function to be optimized
         let mut fdf = gsl_multifit_function_fdf_struct {
-            f: Some(fit_f::<F, P>),
-            df: None,
+            f: Some(fit_f::<F, J, P>),
+            df: Some(fit_j::<F, J, P>),
             fdf: None,
             n,
             p: P as u64,
@@ -61,24 +67,63 @@ pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
             nevaldf: 0,
         };
 
-        unsafe extern "C" fn fit_f<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
+        unsafe extern "C" fn fit_f<
+            F: Fn(f64, [f64; P]) -> Result<f64>,
+            J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+            const P: usize,
+        >(
             params: *const gsl_vector,
             ffi_params: *mut c_void,
             out: *mut gsl_vector,
         ) -> i32 {
+            let (f, _j, data): &(F, J, &[(f64, f64)]) = &*(ffi_params as *const _);
+
             let mut param_cache = [0.0; P];
             for i in 0..P {
                 param_cache[i] = gsl_vector_get(params, i as u64);
             }
 
-            let (f, data): &(F, &[(f64, f64)]) = &*(ffi_params as *const _);
-
             for (i, &(x, y)) in data.iter().enumerate() {
-                let err = y - match f(x, param_cache) {
-                    Ok(y) => y,
-                    Err(e) => return e.into(),
+                let val = catch_unwind(AssertUnwindSafe(move || f(x, param_cache)));
+                let err = y - match val {
+                    Ok(Ok(y)) => y,
+                    Ok(Err(e)) => return e.into(),
+                    Err(_) => return GSLError::BadFunction.into(),
                 };
                 gsl_vector_set(out, i as u64, err);
+            }
+
+            GSL_SUCCESS
+        }
+
+        unsafe extern "C" fn fit_j<
+            F: Fn(f64, [f64; P]) -> Result<f64>,
+            J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+            const P: usize,
+        >(
+            params: *const gsl_vector,
+            ffi_params: *mut c_void,
+            out: *mut gsl_matrix,
+        ) -> i32 {
+            let (_f, j, data): &(F, J, &[(f64, f64)]) = &*(ffi_params as *const _);
+
+            let mut param_cache = [0.0; P];
+            for i in 0..P {
+                param_cache[i] = gsl_vector_get(params, i as u64);
+            }
+
+            for (i, &(x, _y)) in data.iter().enumerate() {
+                let val = catch_unwind(AssertUnwindSafe(move || j(x, param_cache)));
+
+                let dvs = match val {
+                    Ok(Ok(dvs)) => dvs,
+                    Ok(Err(e)) => return e.into(),
+                    Err(_) => return GSLError::BadFunction.into(),
+                };
+
+                for (j, &dv) in dvs.iter().enumerate() {
+                    gsl_matrix_set(out, i as u64, j as u64, -dv);
+                }
             }
 
             GSL_SUCCESS
@@ -90,6 +135,12 @@ pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
             &mut fdf as *mut _ as *mut gsl_multifit_nlinear_fdf,
             workspace,
         );
+
+        // Initial chisq
+        let start_residuals = gsl_multifit_nlinear_residual(workspace);
+        let mut chisq0 = 0.0;
+        gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0 as *mut _);
+        drop(start_residuals);
 
         let mut _info = 0i32;
         let status = gsl_multifit_nlinear_driver(
@@ -103,9 +154,20 @@ pub fn nonlinear_fit<F: Fn(f64, [f64; P]) -> Result<f64>, const P: usize>(
             workspace,
         );
 
+        // Extract fit information
+        let fit_result = gsl_multifit_nlinear_position(workspace);
+        let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
+        let fit_residuals = gsl_multifit_nlinear_residual(workspace);
+        let fit_residual_sum = gsl_vector_sum(fit_residuals);
+
+        //let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
+        //assert!(!fit_covariance.is_null());
+
+        //gsl_multifit_nlinear_covar(jacobian, 0.0, fit_covariance);
+
         let mut param_cache = [0.0; P];
         for i in 0..P {
-            param_cache[i] = gsl_vector_get((*workspace).x, i as u64);
+            param_cache[i] = gsl_vector_get(fit_result, i as u64);
         }
         // todo other statistics
 
@@ -124,8 +186,8 @@ fn test_fit() {
             a + b * x + (a * b) * x.powi(2)
         }
 
-        let a = 10.0 + i as f64;
-        let b = i as f64;
+        let a = 1.0 + i as f64;
+        let b = 1.0 + i as f64;
 
         let data = (0..1000)
             .map(|x| x as f64 / 100.0)
@@ -139,11 +201,11 @@ fn test_fit() {
             1.0e-9,
             [10.0, 5.0],
             &data,
-            |x, params| {
-                let a = params[0];
-                let b = params[1];
-
-                Ok(model(a, b, x))
+            |x, [a, b]| Ok(model(a, b, x)),
+            |x, [a, b]| {
+                let dmda = 1.0 + b * x.powi(2);
+                let dmdb = x + a * x.powi(2);
+                Ok([dmda, dmdb])
             },
         )
         .unwrap();

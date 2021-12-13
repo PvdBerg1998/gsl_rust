@@ -1,3 +1,5 @@
+use std::io::Write;
+
 fn main() {
     std::env::remove_var("NUM_JOBS");
     let out = cmake::Config::new(std::fs::canonicalize("./gsl").unwrap())
@@ -34,4 +36,20 @@ fn main() {
     bindings
         .write_to_file("bindings.rs")
         .expect("Couldn't write bindings!");
+
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open("bindings.rs")
+        .unwrap();
+
+    // This does not get generated unless gsl_vector_double is the only header in wrapper.h
+    // No clue why
+    writeln!(
+        &mut f,
+        "{}",
+        "extern \"C\" {
+        pub fn gsl_vector_sum(a: *const gsl_vector) -> f64;
+    }"
+    )
+    .unwrap();
 }
