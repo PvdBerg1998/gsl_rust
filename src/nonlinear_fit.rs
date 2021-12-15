@@ -191,7 +191,7 @@ unsafe extern "C" fn fit_callback<C: Fn(FitCallback<P>) -> () + RefUnwindSafe, c
     let callback: &C = &*(callback as *const _);
     let _ = catch_unwind(move || {
         callback(FitCallback {
-            iter,
+            iter: iter as usize,
             params: param_cache,
             cond: 1.0 / rcond,
             residual_norm,
@@ -201,7 +201,7 @@ unsafe extern "C" fn fit_callback<C: Fn(FitCallback<P>) -> () + RefUnwindSafe, c
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FitCallback<const P: usize> {
-    pub iter: u64,
+    pub iter: usize,
     pub params: [f64; P],
     pub cond: f64,
     pub residual_norm: f64,

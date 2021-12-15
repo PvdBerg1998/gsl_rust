@@ -4,7 +4,7 @@ use drop_guard::guard;
 use std::panic::RefUnwindSafe;
 
 pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> ()>(
-    max_iter: u64,
+    max_iter: usize,
     a: f64,
     b: f64,
     x0: f64,
@@ -59,7 +59,7 @@ pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> (
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct MinimizerCallback {
-    pub iter: u64,
+    pub iter: usize,
     pub lower_bound: f64,
     pub upper_bound: f64,
     pub x: f64,
