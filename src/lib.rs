@@ -17,16 +17,19 @@ pub type Result<T> = std::result::Result<T, GSLError>;
 pub fn nonlinear_fit<
     F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
     J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
+    C: Fn(FitCallback<P>) -> () + RefUnwindSafe,
     const P: usize,
 >(
     max_iter: usize,
     xtol: f64,
     gtol: f64,
     ftol: f64,
+    approx_jacobian: bool,
     p0: [f64; P],
     data: &[(f64, f64)],
     f: F,
     j: J,
+    callback: C,
 ) -> Result<[f64; P]> {
     unsafe {
         // Define fit method and parameters
@@ -58,7 +61,11 @@ pub fn nonlinear_fit<
         // Function to be optimized
         let mut fdf = gsl_multifit_nlinear_fdf {
             f: Some(fit_f::<F, J, P>),
-            df: Some(fit_j::<F, J, P>),
+            df: if approx_jacobian {
+                None
+            } else {
+                Some(fit_j::<F, J, P>)
+            },
             fvv: None,
             n,
             p: P as u64,
@@ -86,11 +93,11 @@ pub fn nonlinear_fit<
 
             for (i, &(x, y)) in data.iter().enumerate() {
                 let val = catch_unwind(move || f(x, param_cache));
-                let err = y - match val {
+                let err = match val {
                     Ok(Ok(y)) => y,
                     Ok(Err(e)) => return e.into(),
                     Err(_) => return GSLError::BadFunction.into(),
-                };
+                } - y;
                 gsl_vector_set(out, i as u64, err);
             }
 
@@ -123,7 +130,7 @@ pub fn nonlinear_fit<
                 };
 
                 for (j, &dv) in dvs.iter().enumerate() {
-                    gsl_matrix_set(out, i as u64, j as u64, -dv);
+                    gsl_matrix_set(out, i as u64, j as u64, dv);
                 }
             }
 
@@ -145,18 +152,49 @@ pub fn nonlinear_fit<
             xtol,
             gtol,
             ftol,
-            None,
-            std::ptr::null_mut(),
+            Some(fit_callback::<C, P>),
+            &callback as *const _ as *mut c_void,
             &mut _info as *mut _,
             workspace,
         );
 
+        unsafe extern "C" fn fit_callback<
+            C: Fn(FitCallback<P>) -> () + RefUnwindSafe,
+            const P: usize,
+        >(
+            iter: u64,
+            callback: *mut c_void,
+            workspace: *const gsl_multifit_nlinear_workspace,
+        ) {
+            let params = gsl_multifit_nlinear_position(workspace);
+            let mut param_cache = [0.0; P];
+            for i in 0..P {
+                param_cache[i] = gsl_vector_get(params, i as u64);
+            }
+
+            let residuals = gsl_multifit_nlinear_residual(workspace);
+            let residual_norm = gsl_blas_dnrm2(residuals);
+
+            let mut rcond = 0.0;
+            gsl_multifit_nlinear_rcond(&mut rcond as *mut _, workspace);
+
+            let callback: &C = &*(callback as *const _);
+            let _ = catch_unwind(move || {
+                callback(FitCallback {
+                    iter,
+                    params: param_cache,
+                    cond: 1.0 / rcond,
+                    residual_norm,
+                });
+            });
+        }
+
         // Extract fit information
         let fit_result = gsl_multifit_nlinear_position(workspace);
-        let fit_niter = gsl_multifit_nlinear_niter(workspace);
-        let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
-        let fit_residuals = gsl_multifit_nlinear_residual(workspace);
-        let fit_residual_sum = gsl_vector_sum(fit_residuals);
+        //let fit_niter = gsl_multifit_nlinear_niter(workspace);
+        //let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
+        //let fit_residuals = gsl_multifit_nlinear_residual(workspace);
+        //let fit_residual_sum = gsl_vector_sum(fit_residuals);
 
         dbg!(fdf.nevalf, fdf.nevaldf);
 
@@ -177,6 +215,14 @@ pub fn nonlinear_fit<
         GSLError::from_raw(status)?;
         Ok(param_cache)
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct FitCallback<const P: usize> {
+    pub iter: u64,
+    pub params: [f64; P],
+    pub cond: f64,
+    pub residual_norm: f64,
 }
 
 #[test]
@@ -206,6 +252,17 @@ fn test_fit() {
                 let dmda = 1.0 + b * x.powi(2);
                 let dmdb = x + a * x.powi(2);
                 Ok([dmda, dmdb])
+            },
+            |FitCallback {
+                 iter,
+                 params,
+                 cond,
+                 residual_norm,
+             }| {
+                // println!(
+                //     "Iter: {}, Params = {:?}, cond(J) = {:.4}, |f| = {:.4}",
+                //     iter, params, cond, residual_norm
+                // );
             },
         )
         .unwrap();
@@ -241,6 +298,17 @@ fn test_fit_2() {
             let dmda = (a * x + b).cos() * x;
             let dmdb = (a * x + b).cos();
             Ok([dmda, dmdb])
+        },
+        |FitCallback {
+             iter,
+             params,
+             cond,
+             residual_norm,
+         }| {
+            // println!(
+            //     "Iter: {}, Params = {:?}, cond(J) = {:.4}, |f| = {:.4}",
+            //     iter, params, cond, residual_norm
+            // );
         },
     )
     .unwrap();
