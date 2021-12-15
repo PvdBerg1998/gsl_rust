@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 approx = "0.5"
+drop_guard = "0.3.0"
 
 [build-dependencies]
 bindgen = "0.59.2"
