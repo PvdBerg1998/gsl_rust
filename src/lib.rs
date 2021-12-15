@@ -1,5 +1,5 @@
 use std::os::raw::*;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{catch_unwind, RefUnwindSafe};
 
 mod bindings {
     #![allow(dead_code)]
@@ -15,8 +15,8 @@ use bindings::*;
 pub type Result<T> = std::result::Result<T, GSLError>;
 
 pub fn nonlinear_fit<
-    F: Fn(f64, [f64; P]) -> Result<f64>,
-    J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+    F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
+    J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
     const P: usize,
 >(
     max_iter: usize,
@@ -56,20 +56,21 @@ pub fn nonlinear_fit<
         let ffi_params = (f, j, data);
 
         // Function to be optimized
-        let mut fdf = gsl_multifit_function_fdf_struct {
+        let mut fdf = gsl_multifit_nlinear_fdf {
             f: Some(fit_f::<F, J, P>),
             df: Some(fit_j::<F, J, P>),
-            fdf: None,
+            fvv: None,
             n,
             p: P as u64,
             params: &ffi_params as *const _ as *mut c_void,
             nevalf: 0,
             nevaldf: 0,
+            nevalfvv: 0,
         };
 
         unsafe extern "C" fn fit_f<
-            F: Fn(f64, [f64; P]) -> Result<f64>,
-            J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+            F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
+            J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
             const P: usize,
         >(
             params: *const gsl_vector,
@@ -84,7 +85,7 @@ pub fn nonlinear_fit<
             }
 
             for (i, &(x, y)) in data.iter().enumerate() {
-                let val = catch_unwind(AssertUnwindSafe(move || f(x, param_cache)));
+                let val = catch_unwind(move || f(x, param_cache));
                 let err = y - match val {
                     Ok(Ok(y)) => y,
                     Ok(Err(e)) => return e.into(),
@@ -97,8 +98,8 @@ pub fn nonlinear_fit<
         }
 
         unsafe extern "C" fn fit_j<
-            F: Fn(f64, [f64; P]) -> Result<f64>,
-            J: Fn(f64, [f64; P]) -> Result<[f64; P]>,
+            F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
+            J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
             const P: usize,
         >(
             params: *const gsl_vector,
@@ -113,7 +114,7 @@ pub fn nonlinear_fit<
             }
 
             for (i, &(x, _y)) in data.iter().enumerate() {
-                let val = catch_unwind(AssertUnwindSafe(move || j(x, param_cache)));
+                let val = catch_unwind(move || j(x, param_cache));
 
                 let dvs = match val {
                     Ok(Ok(dvs)) => dvs,
@@ -130,11 +131,7 @@ pub fn nonlinear_fit<
         }
 
         // Init workspace
-        gsl_multifit_nlinear_init(
-            param_guess,
-            &mut fdf as *mut _ as *mut gsl_multifit_nlinear_fdf,
-            workspace,
-        );
+        gsl_multifit_nlinear_init(param_guess, &mut fdf as *mut _, workspace);
 
         // Initial chisq
         let start_residuals = gsl_multifit_nlinear_residual(workspace);
@@ -156,9 +153,12 @@ pub fn nonlinear_fit<
 
         // Extract fit information
         let fit_result = gsl_multifit_nlinear_position(workspace);
+        let fit_niter = gsl_multifit_nlinear_niter(workspace);
         let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
         let fit_residuals = gsl_multifit_nlinear_residual(workspace);
         let fit_residual_sum = gsl_vector_sum(fit_residuals);
+
+        dbg!(fdf.nevalf, fdf.nevaldf);
 
         //let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
         //assert!(!fit_covariance.is_null());
@@ -215,7 +215,43 @@ fn test_fit() {
     }
 }
 
-pub fn qag_gk61<F: Fn(f64) -> f64>(
+#[test]
+fn test_fit_2() {
+    fn model(a: f64, b: f64, x: f64) -> f64 {
+        (a * x + b).sin()
+    }
+
+    let a = 10.0;
+    let b = 2.0;
+
+    let data = (0..100)
+        .map(|x| x as f64 / 100.0)
+        .map(|x| (x, model(a, b, x)))
+        .collect::<Vec<_>>();
+
+    let fit_params = nonlinear_fit(
+        1000,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        [9.0, 1.0],
+        &data,
+        |x, [a, b]| Ok(model(a, b, x)),
+        |x, [a, b]| {
+            let dmda = (a * x + b).cos() * x;
+            let dmdb = (a * x + b).cos();
+            Ok([dmda, dmdb])
+        },
+    )
+    .unwrap();
+
+    dbg!(fit_params);
+
+    approx::assert_abs_diff_eq!(fit_params[0], a, epsilon = 1.0e-3);
+    approx::assert_abs_diff_eq!(fit_params[1], b, epsilon = 1.0e-3);
+}
+
+pub fn qag_gk61<F: Fn(f64) -> f64 + RefUnwindSafe>(
     workspace_size: usize,
     a: f64,
     b: f64,
@@ -226,6 +262,17 @@ pub fn qag_gk61<F: Fn(f64) -> f64>(
     unsafe {
         let workspace = gsl_integration_workspace_alloc(workspace_size as u64);
         assert!(!workspace.is_null());
+
+        unsafe extern "C" fn trampoline<F: Fn(f64) -> f64 + RefUnwindSafe>(
+            x: f64,
+            params: *mut c_void,
+        ) -> f64 {
+            let f: &F = &*(params as *const F);
+            match catch_unwind(move || f(x)) {
+                Ok(y) => y,
+                Err(_) => f64::NAN,
+            }
+        }
 
         let gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
@@ -262,11 +309,6 @@ fn test_qag65() {
         0.75,
         epsilon = 1.0e-6
     );
-}
-
-unsafe extern "C" fn trampoline<F: Fn(f64) -> f64>(x: f64, params: *mut c_void) -> f64 {
-    let f: &F = &*(params as *const F);
-    f(x)
 }
 
 pub fn disable_error_handler() {
