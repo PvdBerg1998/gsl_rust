@@ -33,18 +33,21 @@ pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> (
             let status = gsl_min_fminimizer_iterate(minimizer);
             GSLError::from_raw(status)?;
 
-            let lower_bound = gsl_min_fminimizer_x_lower(minimizer);
-            let upper_bound = gsl_min_fminimizer_x_upper(minimizer);
+            let x_lower = gsl_min_fminimizer_x_lower(minimizer);
+            let x_upper = gsl_min_fminimizer_x_upper(minimizer);
+            let y_lower = gsl_min_fminimizer_f_lower(minimizer);
+            let y_upper = gsl_min_fminimizer_f_upper(minimizer);
             let x = gsl_min_fminimizer_x_minimum(minimizer);
+            let y = gsl_min_fminimizer_f_minimum(minimizer);
 
             callback(MinimizerCallback {
                 iter,
-                lower_bound,
-                upper_bound,
-                x,
+                lower_bound: (x_lower, y_lower),
+                upper_bound: (x_upper, y_upper),
+                minimum: (x, y),
             });
 
-            let status = gsl_min_test_interval(lower_bound, upper_bound, epsabs, epsrel);
+            let status = gsl_min_test_interval(x_lower, x_upper, epsabs, epsrel);
             if let Ok(_) = GSLError::from_raw(status) {
                 return Ok(x);
             }
@@ -60,9 +63,9 @@ pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> (
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct MinimizerCallback {
     pub iter: usize,
-    pub lower_bound: f64,
-    pub upper_bound: f64,
-    pub x: f64,
+    pub lower_bound: (f64, f64),
+    pub upper_bound: (f64, f64),
+    pub minimum: (f64, f64),
 }
 
 #[test]
