@@ -1,17 +1,16 @@
 use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
-use std::panic::RefUnwindSafe;
 
-pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> ()>(
+pub fn minimize<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback) -> ()>(
     max_iter: usize,
     a: f64,
     b: f64,
     x0: f64,
     epsabs: f64,
     epsrel: f64,
-    f: F,
-    callback: C,
+    mut f: F,
+    mut callback: C,
 ) -> Result<f64> {
     unsafe {
         let minimizer = gsl_min_fminimizer_alloc(gsl_min_fminimizer_brent);
@@ -22,7 +21,7 @@ pub fn minimize<F: Fn(f64) -> f64 + RefUnwindSafe, C: Fn(MinimizerCallback) -> (
 
         let mut gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
-            params: &f as *const _ as *mut _,
+            params: &mut f as *mut _ as *mut _,
         };
 
         let status = gsl_min_fminimizer_set(minimizer, &mut gsl_f as *mut _, x0, a, b);

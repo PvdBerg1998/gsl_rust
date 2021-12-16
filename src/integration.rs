@@ -1,14 +1,13 @@
 use crate::bindings::*;
 use crate::*;
-use std::panic::RefUnwindSafe;
 
-pub fn qag_gk61<F: Fn(f64) -> f64 + RefUnwindSafe>(
+pub fn qag_gk61<F: FnMut(f64) -> f64>(
     workspace_size: usize,
     a: f64,
     b: f64,
     epsabs: f64,
     epsrel: f64,
-    f: F,
+    mut f: F,
 ) -> Result<f64> {
     unsafe {
         let workspace = gsl_integration_workspace_alloc(workspace_size as u64);
@@ -16,7 +15,7 @@ pub fn qag_gk61<F: Fn(f64) -> f64 + RefUnwindSafe>(
 
         let gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
-            params: &f as *const _ as *mut _,
+            params: &mut f as *mut _ as *mut _,
         };
 
         let mut result = 0.0f64;

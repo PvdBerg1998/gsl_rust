@@ -1,5 +1,5 @@
 use std::os::raw::*;
-use std::panic::{catch_unwind, RefUnwindSafe};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub mod integration;
 pub mod minimizer;
@@ -24,12 +24,9 @@ pub fn disable_error_handler() {
     }
 }
 
-unsafe extern "C" fn trampoline<F: Fn(f64) -> f64 + RefUnwindSafe>(
-    x: f64,
-    params: *mut c_void,
-) -> f64 {
-    let f: &F = &*(params as *const F);
-    match catch_unwind(move || f(x)) {
+unsafe extern "C" fn trampoline<F: FnMut(f64) -> f64>(x: f64, params: *mut c_void) -> f64 {
+    let f: &mut F = &mut *(params as *mut F);
+    match catch_unwind(AssertUnwindSafe(move || f(x))) {
         Ok(y) => y,
         Err(_) => f64::NAN,
     }

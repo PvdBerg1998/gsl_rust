@@ -1,11 +1,11 @@
 use crate::bindings::*;
 use crate::*;
-use std::panic::{catch_unwind, RefUnwindSafe};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub fn nonlinear_fit<
-    F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
-    //J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
-    C: Fn(FitCallback<P>) -> () + RefUnwindSafe,
+    F: FnMut(f64, [f64; P]) -> Result<f64>,
+    //J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
+    C: FnMut(FitCallback<P>) -> (),
     const P: usize,
 >(
     max_iter: usize,
@@ -43,8 +43,8 @@ pub fn nonlinear_fit<
         }
 
         // Information we need inside the trampolines
-        //let ffi_params = (f, j, data);
-        let ffi_params = (f, data);
+        //let mut ffi_params = (f, j, data);
+        let mut ffi_params = (f, data);
 
         // Function to be optimized
         let mut fdf = gsl_multifit_nlinear_fdf {
@@ -53,7 +53,7 @@ pub fn nonlinear_fit<
             fvv: None,
             n,
             p: P as u64,
-            params: &ffi_params as *const _ as *mut c_void,
+            params: &mut ffi_params as *mut _ as *mut _,
             nevalf: 0,
             nevaldf: 0,
             nevalfvv: 0,
@@ -108,16 +108,16 @@ pub fn nonlinear_fit<
 }
 
 unsafe extern "C" fn fit_f<
-    F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
-    //J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
+    F: FnMut(f64, [f64; P]) -> Result<f64>,
+    //J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
     const P: usize,
 >(
     params: *const gsl_vector,
     ffi_params: *mut c_void,
     out: *mut gsl_vector,
 ) -> i32 {
-    //let (f, _j, data): &(F, J, &[(f64, f64)]) = &*(ffi_params as *const _);
-    let (f, data): &(F, &[(f64, f64)]) = &*(ffi_params as *const _);
+    //let (f, _j, data): &mut (F, J, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
+    let (f, data): &mut (F, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
@@ -125,7 +125,7 @@ unsafe extern "C" fn fit_f<
     }
 
     for (i, &(x, y)) in data.iter().enumerate() {
-        let val = catch_unwind(move || f(x, param_cache));
+        let val = catch_unwind(AssertUnwindSafe(|| f(x, param_cache)));
         let err = match val {
             Ok(Ok(y)) => y,
             Ok(Err(e)) => return e.into(),
@@ -139,15 +139,15 @@ unsafe extern "C" fn fit_f<
 
 #[allow(dead_code)]
 unsafe extern "C" fn fit_j<
-    F: Fn(f64, [f64; P]) -> Result<f64> + RefUnwindSafe,
-    J: Fn(f64, [f64; P]) -> Result<[f64; P]> + RefUnwindSafe,
+    F: FnMut(f64, [f64; P]) -> Result<f64>,
+    J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
     const P: usize,
 >(
     params: *const gsl_vector,
     ffi_params: *mut c_void,
     out: *mut gsl_matrix,
 ) -> i32 {
-    let (_f, j, data): &(F, J, &[(f64, f64)]) = &*(ffi_params as *const _);
+    let (_f, j, data): &mut (F, J, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
@@ -155,7 +155,7 @@ unsafe extern "C" fn fit_j<
     }
 
     for (i, &(x, _y)) in data.iter().enumerate() {
-        let val = catch_unwind(move || j(x, param_cache));
+        let val = catch_unwind(AssertUnwindSafe(|| j(x, param_cache)));
 
         let dvs = match val {
             Ok(Ok(dvs)) => dvs,
@@ -171,7 +171,7 @@ unsafe extern "C" fn fit_j<
     GSL_SUCCESS
 }
 
-unsafe extern "C" fn fit_callback<C: Fn(FitCallback<P>) -> () + RefUnwindSafe, const P: usize>(
+unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize>(
     iter: u64,
     callback: *mut c_void,
     workspace: *const gsl_multifit_nlinear_workspace,
@@ -188,15 +188,15 @@ unsafe extern "C" fn fit_callback<C: Fn(FitCallback<P>) -> () + RefUnwindSafe, c
     let mut rcond = 0.0;
     gsl_multifit_nlinear_rcond(&mut rcond as *mut _, workspace);
 
-    let callback: &C = &*(callback as *const _);
-    let _ = catch_unwind(move || {
+    let callback: &mut C = &mut *(callback as *mut _);
+    let _ = catch_unwind(AssertUnwindSafe(|| {
         callback(FitCallback {
             iter: iter as usize,
             params: param_cache,
             cond: 1.0 / rcond,
             residual_norm,
         });
-    });
+    }));
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
