@@ -7,6 +7,9 @@ edition = "2021"
 approx = "0.5"
 drop_guard = "0.3.0"
 
+[dev-dependencies]
+fastrand = "1.6"
+
 [build-dependencies]
 bindgen = "0.59.2"
 cmake = "0.1"

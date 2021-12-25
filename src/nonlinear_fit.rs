@@ -21,7 +21,7 @@ pub fn nonlinear_fit<
     f: F,
     //j: J,
     callback: C,
-) -> Result<[f64; P]> {
+) -> Result<FitResult<P>> {
     unsafe {
         // Define fit method and parameters
         let fit_type = gsl_multifit_nlinear_trust;
@@ -65,9 +65,9 @@ pub fn nonlinear_fit<
         // Init workspace
         gsl_multifit_nlinear_init(param_guess, &mut fdf as *mut _, workspace);
 
-        // Initial chisq
+        // Initial cost function chi^2_0
         let start_residuals = gsl_multifit_nlinear_residual(workspace);
-        let mut chisq0 = 0.0;
+        let mut chisq0 = 0.0f64;
         gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0 as *mut _);
         drop(start_residuals);
 
@@ -83,30 +83,77 @@ pub fn nonlinear_fit<
             workspace,
         );
 
-        // Extract fit information
+        /*
+
+             Extract fit information
+
+        */
+
+        // Numerical fit results
         let fit_result = gsl_multifit_nlinear_position(workspace);
-        // todo:
-        //let fit_niter = gsl_multifit_nlinear_niter(workspace);
-        //let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
-        //let fit_residuals = gsl_multifit_nlinear_residual(workspace);
-        //let fit_residual_sum = gsl_vector_sum(fit_residuals);
+        let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
+        let fit_residuals = gsl_multifit_nlinear_residual(workspace);
 
-        //let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
-        //assert!(!fit_covariance.is_null());
+        // Fit evaluation statistics
+        let fit_niter = gsl_multifit_nlinear_niter(workspace);
+        let fit_neval_f = fdf.nevalf;
+        //let fit_neval_df = fdf.nevaldf;
 
-        //gsl_multifit_nlinear_covar(jacobian, 0.0, fit_covariance);
+        // Final cost function chi^2_1
+        let mut chisq1 = 0.0f64;
+        gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1 as *mut _);
 
+        // Allocate variance-covariance matrix
+        let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
+        assert!(!fit_covariance.is_null());
+
+        // Calculate variance-covariance matrix
+        gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance);
+        gsl_matrix_scale(fit_covariance, chisq1 / (n as f64 - P as f64));
+
+        // Calculate variance of data itself
+        let mean = data.iter().map(|(_, y)| *y).sum::<f64>() / n as f64;
+        let variance = data
+            .iter()
+            .map(|(_, y)| *y)
+            .map(|y| (y - mean).powi(2))
+            .sum::<f64>();
+
+        // R^2 "goodness of fit"
+        let r_squared = 1.0 - chisq1 / variance;
+
+        // Extract fitted parameters
         let mut param_cache = [0.0; P];
         for i in 0..P {
             param_cache[i] = gsl_vector_get(fit_result, i as u64);
         }
-        // todo other statistics
 
+        // Extract parameter uncertainties
+        let mut param_sigma_cache = [0.0; P];
+        for i in 0..P {
+            param_sigma_cache[i] = gsl_matrix_get(fit_covariance, i as u64, i as u64).sqrt();
+        }
+
+        let result = FitResult {
+            params: param_cache,
+            uncertainties: param_sigma_cache,
+            niter: fit_niter,
+            neval_f: fit_neval_f,
+            //neval_j: fit_neval_df,
+            initial_residual_squared: chisq0,
+            final_residual_squared: chisq1,
+            final_residual_variance: chisq1 / (n as f64 - P as f64),
+            mean,
+            r_squared,
+        };
+
+        // Free memory
+        gsl_matrix_free(fit_covariance);
         gsl_multifit_nlinear_free(workspace);
         gsl_vector_free(param_guess);
 
         GSLError::from_raw(status)?;
-        Ok(param_cache)
+        Ok(result)
     }
 }
 
@@ -188,7 +235,8 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize
     }
 
     let residuals = gsl_multifit_nlinear_residual(workspace);
-    let residual_norm = gsl_blas_dnrm2(residuals);
+    let mut chisq = 0.0f64;
+    gsl_blas_ddot(residuals, residuals, &mut chisq as *mut _);
 
     let mut rcond = 0.0;
     gsl_multifit_nlinear_rcond(&mut rcond as *mut _, workspace);
@@ -199,7 +247,7 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize
             iter: iter as usize,
             params: param_cache,
             cond: 1.0 / rcond,
-            residual_norm,
+            residual_squared: chisq,
         });
     }));
 }
@@ -209,7 +257,21 @@ pub struct FitCallback<const P: usize> {
     pub iter: usize,
     pub params: [f64; P],
     pub cond: f64,
-    pub residual_norm: f64,
+    pub residual_squared: f64,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct FitResult<const P: usize> {
+    pub params: [f64; P],
+    pub uncertainties: [f64; P],
+    pub niter: u64,
+    pub neval_f: u64,
+    //pub neval_j: u64,
+    pub initial_residual_squared: f64,
+    pub final_residual_squared: f64,
+    pub final_residual_variance: f64,
+    pub mean: f64,
+    pub r_squared: f64,
 }
 
 impl Default for HyperParams {
@@ -235,7 +297,7 @@ fn test_fit() {
             .map(|x| (x, model(a, b, x)))
             .collect::<Vec<_>>();
 
-        let fit_params = nonlinear_fit(
+        let fit = nonlinear_fit(
             1000,
             1.0e-9,
             1.0e-9,
@@ -253,8 +315,10 @@ fn test_fit() {
         )
         .unwrap();
 
-        approx::assert_abs_diff_eq!(fit_params[0], a, epsilon = 1.0e-3);
-        approx::assert_abs_diff_eq!(fit_params[1], b, epsilon = 1.0e-3);
+        //dbg!(fit);
+
+        approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-3);
+        approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-3);
     }
 }
 
@@ -274,7 +338,7 @@ fn test_fit_2() {
         .map(|x| (x, model(a, b, x)))
         .collect::<Vec<_>>();
 
-    let fit_params = nonlinear_fit(
+    let fit = nonlinear_fit(
         1000,
         1.0e-9,
         1.0e-9,
@@ -292,8 +356,52 @@ fn test_fit_2() {
     )
     .unwrap();
 
-    dbg!(fit_params);
+    dbg!(fit);
 
-    approx::assert_abs_diff_eq!(fit_params[0], a, epsilon = 1.0e-3);
-    approx::assert_abs_diff_eq!(fit_params[1], b, epsilon = 1.0e-3);
+    approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-3);
+    approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-3);
+}
+
+#[test]
+fn test_fit_3() {
+    disable_error_handler();
+    fastrand::seed(0);
+
+    fn model(a: f64, b: f64, c: f64, x: f64) -> f64 {
+        a * (-b * x).exp() + c
+    }
+
+    let a = 5.0;
+    let b = 1.5;
+    let c = 1.0;
+
+    let data = (0..100)
+        .map(|x| x as f64 / 100.0 * 3.0)
+        .map(|x| (x, model(a, b, c, x) + 0.2 * (fastrand::f64() * 2.0 - 1.0)))
+        .collect::<Vec<_>>();
+
+    let fit = nonlinear_fit(
+        1000,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [1.0, 1.0, 0.0],
+        &data,
+        |&x, [a, b, c]| Ok(model(a, b, c, x)),
+        /*|x, [a, b]| {
+            let dmda = (a * x + b).cos() * x;
+            let dmdb = (a * x + b).cos();
+            Ok([dmda, dmdb])
+        },*/
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap();
+
+    dbg!(fit);
+
+    approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-2);
+    approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-2);
 }
