@@ -2,9 +2,12 @@ use crate::bindings::*;
 use crate::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+pub type HyperParams = gsl_multifit_nlinear_parameters;
+
 pub fn nonlinear_fit<
-    F: FnMut(f64, [f64; P]) -> Result<f64>,
-    //J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
+    X,
+    F: FnMut(&X, [f64; P]) -> Result<f64>,
+    //J: FnMut(X, [f64; P]) -> Result<[f64; P]>,
     C: FnMut(FitCallback<P>) -> (),
     const P: usize,
 >(
@@ -12,8 +15,9 @@ pub fn nonlinear_fit<
     xtol: f64,
     gtol: f64,
     ftol: f64,
+    hyper_params: HyperParams,
     p0: [f64; P],
-    data: &[(f64, f64)],
+    data: &[(X, f64)],
     f: F,
     //j: J,
     callback: C,
@@ -21,7 +25,6 @@ pub fn nonlinear_fit<
     unsafe {
         // Define fit method and parameters
         let fit_type = gsl_multifit_nlinear_trust;
-        let fit_params = gsl_multifit_nlinear_default_parameters();
 
         // Amount of datapoints
         let n = data.len() as u64;
@@ -29,7 +32,7 @@ pub fn nonlinear_fit<
         // Allocate workspace
         let workspace = gsl_multifit_nlinear_alloc(
             fit_type,
-            &fit_params as *const _,
+            &hyper_params as *const _,
             n,        // amount of datapoints
             P as u64, // amount of parameters
         );
@@ -48,7 +51,7 @@ pub fn nonlinear_fit<
 
         // Function to be optimized
         let mut fdf = gsl_multifit_nlinear_fdf {
-            f: Some(fit_f::<F, P>), // Some(fit_f::<F, J, P>),
+            f: Some(fit_f::<X, F, P>), // Some(fit_f::<X, F, J, P>),
             df: None,
             fvv: None,
             n,
@@ -108,29 +111,30 @@ pub fn nonlinear_fit<
 }
 
 unsafe extern "C" fn fit_f<
-    F: FnMut(f64, [f64; P]) -> Result<f64>,
-    //J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
+    X,
+    F: FnMut(&X, [f64; P]) -> Result<f64>,
+    //J: FnMut(X, [f64; P]) -> Result<[f64; P]>,
     const P: usize,
 >(
     params: *const gsl_vector,
     ffi_params: *mut c_void,
     out: *mut gsl_vector,
 ) -> i32 {
-    //let (f, _j, data): &mut (F, J, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
-    let (f, data): &mut (F, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
+    //let (f, _j, data): &mut (F, J, &[(X, f64)]) = &mut *(ffi_params as *mut _);
+    let (f, data): &mut (F, &[(X, f64)]) = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
         param_cache[i] = gsl_vector_get(params, i as u64);
     }
 
-    for (i, &(x, y)) in data.iter().enumerate() {
+    for (i, (x, y)) in data.iter().enumerate() {
         let val = catch_unwind(AssertUnwindSafe(|| f(x, param_cache)));
         let err = match val {
             Ok(Ok(y)) => y,
             Ok(Err(e)) => return e.into(),
             Err(_) => return GSLError::BadFunction.into(),
-        } - y;
+        } - *y;
         gsl_vector_set(out, i as u64, err);
     }
 
@@ -139,22 +143,23 @@ unsafe extern "C" fn fit_f<
 
 #[allow(dead_code)]
 unsafe extern "C" fn fit_j<
-    F: FnMut(f64, [f64; P]) -> Result<f64>,
-    J: FnMut(f64, [f64; P]) -> Result<[f64; P]>,
+    X,
+    F: FnMut(&X, [f64; P]) -> Result<f64>,
+    J: FnMut(&X, [f64; P]) -> Result<[f64; P]>,
     const P: usize,
 >(
     params: *const gsl_vector,
     ffi_params: *mut c_void,
     out: *mut gsl_matrix,
 ) -> i32 {
-    let (_f, j, data): &mut (F, J, &[(f64, f64)]) = &mut *(ffi_params as *mut _);
+    let (_f, j, data): &mut (F, J, &[(X, f64)]) = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
         param_cache[i] = gsl_vector_get(params, i as u64);
     }
 
-    for (i, &(x, _y)) in data.iter().enumerate() {
+    for (i, (x, _y)) in data.iter().enumerate() {
         let val = catch_unwind(AssertUnwindSafe(|| j(x, param_cache)));
 
         let dvs = match val {
@@ -207,6 +212,12 @@ pub struct FitCallback<const P: usize> {
     pub residual_norm: f64,
 }
 
+impl Default for HyperParams {
+    fn default() -> Self {
+        unsafe { gsl_multifit_nlinear_default_parameters() }
+    }
+}
+
 #[test]
 fn test_fit() {
     disable_error_handler();
@@ -229,9 +240,10 @@ fn test_fit() {
             1.0e-9,
             1.0e-9,
             1.0e-9,
+            HyperParams::default(),
             [10.0, 5.0],
             &data,
-            |x, [a, b]| Ok(model(a, b, x)),
+            |&x, [a, b]| Ok(model(a, b, x)),
             /*|x, [a, b]| {
                 let dmda = 1.0 + b * x.powi(2);
                 let dmdb = x + a * x.powi(2);
@@ -267,9 +279,10 @@ fn test_fit_2() {
         1.0e-9,
         1.0e-9,
         1.0e-9,
+        HyperParams::default(),
         [9.0, 1.0],
         &data,
-        |x, [a, b]| Ok(model(a, b, x)),
+        |&x, [a, b]| Ok(model(a, b, x)),
         /*|x, [a, b]| {
             let dmda = (a * x + b).cos() * x;
             let dmdb = (a * x + b).cos();

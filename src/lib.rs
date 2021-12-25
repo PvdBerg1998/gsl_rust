@@ -8,7 +8,7 @@ pub mod nonlinear_fit;
 mod error;
 pub use error::*;
 
-mod bindings {
+pub mod bindings {
     #![allow(dead_code)]
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
