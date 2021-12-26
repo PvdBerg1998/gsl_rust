@@ -2,7 +2,7 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
+pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
     data: &[(X, f64)],
     mut f: F,
 ) -> Result<FitResult<P>> {
@@ -44,7 +44,7 @@ pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
         // i in 0..n
         // j in 0..P
         for (i, (data_x, _y)) in data.iter().enumerate() {
-            for (j, f_j) in f(data_x)?.into_iter().enumerate() {
+            for (j, f_j) in f(data_x).into_iter().enumerate() {
                 gsl_matrix_set(x, i as u64, j as u64, f_j);
             }
         }
@@ -117,7 +117,7 @@ fn test_fit_1() {
         .map(|x| (x, model(a, b, c, x)))
         .collect::<Vec<_>>();
 
-    let fit = linear_fit(&data, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
+    let fit = linear_fit(&data, |&x| [1.0, x, x.powi(2)]).unwrap();
 
     dbg!(fit);
 
@@ -144,7 +144,7 @@ fn test_fit_2() {
         .map(|x| (x, model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0)))
         .collect::<Vec<_>>();
 
-    let fit = linear_fit(&data, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
+    let fit = linear_fit(&data, |&x| [1.0, x, x.powi(2)]).unwrap();
 
     dbg!(fit);
 

@@ -7,7 +7,6 @@ pub type HyperParams = gsl_multifit_nlinear_parameters;
 pub fn nonlinear_fit<
     X,
     F: FnMut(&X, [f64; P]) -> Result<f64>,
-    //J: FnMut(X, [f64; P]) -> Result<[f64; P]>,
     C: FnMut(FitCallback<P>) -> (),
     const P: usize,
 >(
@@ -19,7 +18,6 @@ pub fn nonlinear_fit<
     p0: [f64; P],
     data: &[(X, f64)],
     f: F,
-    //j: J,
     callback: C,
 ) -> Result<FitResult<P>> {
     unsafe {
@@ -43,12 +41,16 @@ pub fn nonlinear_fit<
         }
 
         // Information we need inside the trampolines
-        //let mut ffi_params = (f, j, data);
-        let mut ffi_params = (f, data);
+        let mut ffi_params = FFIParams {
+            f,
+            data,
+            error: GSL_SUCCESS,
+            panicked: false,
+        };
 
         // Function to be optimized
         let mut fdf = gsl_multifit_nlinear_fdf {
-            f: Some(fit_f::<X, F, P>), // Some(fit_f::<X, F, J, P>),
+            f: Some(fit_f::<X, F, P>),
             df: None,
             fvv: None,
             n,
@@ -94,7 +96,6 @@ pub fn nonlinear_fit<
         // Fit evaluation statistics
         let fit_niter = gsl_multifit_nlinear_niter(workspace);
         let fit_neval_f = fdf.nevalf;
-        //let fit_neval_df = fdf.nevaldf;
 
         // Final cost function chi^2_1
         let mut chisq1 = 0.0f64;
@@ -136,7 +137,6 @@ pub fn nonlinear_fit<
             uncertainties: param_sigma_cache,
             niter: fit_niter,
             neval_f: fit_neval_f,
-            //neval_j: fit_neval_df,
             initial_residual_squared: chisq0,
             final_residual_squared: chisq1,
             final_residual_variance: chisq1 / (n as f64 - P as f64),
@@ -149,35 +149,47 @@ pub fn nonlinear_fit<
         gsl_multifit_nlinear_free(workspace);
         gsl_vector_free(param_guess);
 
+        if ffi_params.panicked {
+            return Err(GSLError::BadFunction);
+        }
+        GSLError::from_raw(ffi_params.error)?;
         GSLError::from_raw(status)?;
         Ok(result)
     }
 }
 
-unsafe extern "C" fn fit_f<
-    X,
-    F: FnMut(&X, [f64; P]) -> Result<f64>,
-    //J: FnMut(X, [f64; P]) -> Result<[f64; P]>,
-    const P: usize,
->(
+struct FFIParams<'a, F, X> {
+    f: F,
+    data: &'a [(X, f64)],
+    error: i32,
+    panicked: bool,
+}
+
+unsafe extern "C" fn fit_f<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: usize>(
     params: *const gsl_vector,
     ffi_params: *mut c_void,
     out: *mut gsl_vector,
 ) -> i32 {
-    //let (f, _j, data): &mut (F, J, &[(X, f64)]) = &mut *(ffi_params as *mut _);
-    let (f, data): &mut (F, &[(X, f64)]) = &mut *(ffi_params as *mut _);
+    let ffi_params: &mut FFIParams<'_, F, X> = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
         param_cache[i] = gsl_vector_get(params, i as u64);
     }
 
-    for (i, (x, y)) in data.iter().enumerate() {
-        let val = catch_unwind(AssertUnwindSafe(|| f(x, param_cache)));
+    for (i, (x, y)) in ffi_params.data.iter().enumerate() {
+        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.f)(x, param_cache)));
         let err = match val {
             Ok(Ok(y)) => y,
-            Ok(Err(e)) => return e.into(),
-            Err(_) => return GSLError::BadFunction.into(),
+            Ok(Err(e)) => {
+                let e = e.into();
+                ffi_params.error = e;
+                return e;
+            }
+            Err(_) => {
+                ffi_params.panicked = true;
+                return GSLError::BadFunction.into();
+            }
         } - *y;
         gsl_vector_set(out, i as u64, err);
     }
@@ -185,7 +197,7 @@ unsafe extern "C" fn fit_f<
     GSL_SUCCESS
 }
 
-#[allow(dead_code)]
+/*
 unsafe extern "C" fn fit_j<
     X,
     F: FnMut(&X, [f64; P]) -> Result<f64>,
@@ -196,20 +208,27 @@ unsafe extern "C" fn fit_j<
     ffi_params: *mut c_void,
     out: *mut gsl_matrix,
 ) -> i32 {
-    let (_f, j, data): &mut (F, J, &[(X, f64)]) = &mut *(ffi_params as *mut _);
+    let ffi_params: &mut FFIParams<'_, F, J, X> = &mut *(ffi_params as *mut _);
 
     let mut param_cache = [0.0; P];
     for i in 0..P {
         param_cache[i] = gsl_vector_get(params, i as u64);
     }
 
-    for (i, (x, _y)) in data.iter().enumerate() {
-        let val = catch_unwind(AssertUnwindSafe(|| j(x, param_cache)));
+    for (i, (x, _y)) in ffi_params.data.iter().enumerate() {
+        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.j)(x, param_cache)));
 
         let dvs = match val {
             Ok(Ok(dvs)) => dvs,
-            Ok(Err(e)) => return e.into(),
-            Err(_) => return GSLError::BadFunction.into(),
+            Ok(Err(e)) => {
+                let e = e.into();
+                ffi_params.error = e;
+                return e;
+            }
+            Err(_) => {
+                ffi_params.panicked = true;
+                return GSLError::BadFunction.into();
+            }
         };
 
         for (j, &dv) in dvs.iter().enumerate() {
@@ -219,6 +238,7 @@ unsafe extern "C" fn fit_j<
 
     GSL_SUCCESS
 }
+*/
 
 unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize>(
     iter: u64,
@@ -263,7 +283,6 @@ pub struct FitResult<const P: usize> {
     pub uncertainties: [f64; P],
     pub niter: u64,
     pub neval_f: u64,
-    //pub neval_j: u64,
     pub initial_residual_squared: f64,
     pub final_residual_squared: f64,
     pub final_residual_variance: f64,
@@ -303,11 +322,6 @@ fn test_nlfit_1() {
             [10.0, 5.0],
             &data,
             |&x, [a, b]| Ok(model(a, b, x)),
-            /*|x, [a, b]| {
-                let dmda = 1.0 + b * x.powi(2);
-                let dmdb = x + a * x.powi(2);
-                Ok([dmda, dmdb])
-            },*/
             |callback| {
                 dbg!(callback);
             },
@@ -346,11 +360,6 @@ fn test_nlfit_2() {
         [9.0, 1.0],
         &data,
         |&x, [a, b]| Ok(model(a, b, x)),
-        /*|x, [a, b]| {
-            let dmda = (a * x + b).cos() * x;
-            let dmdb = (a * x + b).cos();
-            Ok([dmda, dmdb])
-        },*/
         |callback| {
             dbg!(callback);
         },
@@ -390,11 +399,6 @@ fn test_nlfit_3() {
         [1.0, 1.0, 0.0],
         &data,
         |&x, [a, b, c]| Ok(model(a, b, c, x)),
-        /*|x, [a, b]| {
-            let dmda = (a * x + b).cos() * x;
-            let dmdb = (a * x + b).cos();
-            Ok([dmda, dmdb])
-        },*/
         |callback| {
             dbg!(callback);
         },
@@ -405,4 +409,48 @@ fn test_nlfit_3() {
 
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-2);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-2);
+}
+
+#[test]
+fn test_nlfit_panic() {
+    disable_error_handler();
+
+    let fit = nonlinear_fit(
+        1000,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [1.0],
+        &[(0, 0.0), (1, 1.0), (2, 2.0)],
+        |_, [_]| panic!(),
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(fit, GSLError::BadFunction);
+}
+
+#[test]
+fn test_nlfit_error() {
+    disable_error_handler();
+
+    let fit = nonlinear_fit(
+        1000,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [1.0],
+        &[(0, 0.0), (1, 1.0), (2, 2.0)],
+        |_, [_]| Err(GSLError::Fault),
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(fit, GSLError::Fault);
 }
