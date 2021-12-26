@@ -1,5 +1,6 @@
 use crate::bindings::*;
 use crate::*;
+use drop_guard::guard;
 
 pub fn qag<F: FnMut(f64) -> f64>(
     workspace_size: usize,
@@ -13,6 +14,9 @@ pub fn qag<F: FnMut(f64) -> f64>(
     unsafe {
         let workspace = gsl_integration_workspace_alloc(workspace_size as u64);
         assert!(!workspace.is_null());
+        let _free_workspace = guard(workspace, |workspace| {
+            gsl_integration_workspace_free(workspace);
+        });
 
         let gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
@@ -34,8 +38,6 @@ pub fn qag<F: FnMut(f64) -> f64>(
             &mut result as *mut _,
             &mut final_abserr as *mut _,
         );
-
-        gsl_integration_workspace_free(workspace);
 
         GSLError::from_raw(status)?;
         Ok(result)

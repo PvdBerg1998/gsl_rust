@@ -1,5 +1,6 @@
 use crate::bindings::*;
 use crate::*;
+use drop_guard::guard;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub type HyperParams = gsl_multifit_nlinear_parameters;
@@ -32,13 +33,15 @@ pub fn nonlinear_fit<
             P as u64,
         );
         assert!(!workspace.is_null());
+        let _free_workspace = guard(workspace, |workspace| {
+            gsl_multifit_nlinear_free(workspace);
+        });
 
         // Initial parameter guess
-        let param_guess = gsl_vector_alloc(P as u64);
-        assert!(!param_guess.is_null());
-        for (i, &p) in p0.iter().enumerate() {
-            gsl_vector_set(param_guess, i as u64, p);
-        }
+        let param_guess = alloc_filled_vector(&p0);
+        let _free_param_guess = guard(param_guess, |param_guess| {
+            gsl_vector_free(param_guess);
+        });
 
         // Information we need inside the trampolines
         let mut ffi_params = FFIParams {
@@ -104,6 +107,9 @@ pub fn nonlinear_fit<
         // Allocate variance-covariance matrix
         let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
         assert!(!fit_covariance.is_null());
+        let _free_covariance = guard(fit_covariance, |fit_covariance| {
+            gsl_matrix_free(fit_covariance);
+        });
 
         // Calculate variance-covariance matrix
         gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance);
@@ -121,16 +127,10 @@ pub fn nonlinear_fit<
         let r_squared = 1.0 - chisq1 / tss;
 
         // Extract fitted parameters
-        let mut param_cache = [0.0; P];
-        for i in 0..P {
-            param_cache[i] = gsl_vector_get(fit_result, i as u64);
-        }
+        let param_cache = copy_from_vector::<P>(fit_result);
 
         // Extract parameter uncertainties
-        let mut param_sigma_cache = [0.0; P];
-        for i in 0..P {
-            param_sigma_cache[i] = gsl_matrix_get(fit_covariance, i as u64, i as u64).sqrt();
-        }
+        let param_sigma_cache = copy_diagonal_from_matrix::<P>(fit_covariance).map(|x| x.sqrt());
 
         let result = FitResult {
             params: param_cache,
@@ -143,11 +143,6 @@ pub fn nonlinear_fit<
             mean,
             r_squared,
         };
-
-        // Free memory
-        gsl_matrix_free(fit_covariance);
-        gsl_multifit_nlinear_free(workspace);
-        gsl_vector_free(param_guess);
 
         if ffi_params.panicked {
             return Err(GSLError::BadFunction);
@@ -171,11 +166,7 @@ unsafe extern "C" fn fit_f<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: us
     out: *mut gsl_vector,
 ) -> i32 {
     let ffi_params: &mut FFIParams<'_, F, X> = &mut *(ffi_params as *mut _);
-
-    let mut param_cache = [0.0; P];
-    for i in 0..P {
-        param_cache[i] = gsl_vector_get(params, i as u64);
-    }
+    let param_cache = copy_from_vector::<P>(params);
 
     for (i, (x, y)) in ffi_params.data.iter().enumerate() {
         let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.f)(x, param_cache)));
@@ -209,11 +200,7 @@ unsafe extern "C" fn fit_j<
     out: *mut gsl_matrix,
 ) -> i32 {
     let ffi_params: &mut FFIParams<'_, F, J, X> = &mut *(ffi_params as *mut _);
-
-    let mut param_cache = [0.0; P];
-    for i in 0..P {
-        param_cache[i] = gsl_vector_get(params, i as u64);
-    }
+    let param_cache = copy_from_vector::<P>(params);
 
     for (i, (x, _y)) in ffi_params.data.iter().enumerate() {
         let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.j)(x, param_cache)));
@@ -246,10 +233,7 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize
     workspace: *const gsl_multifit_nlinear_workspace,
 ) {
     let params = gsl_multifit_nlinear_position(workspace);
-    let mut param_cache = [0.0; P];
-    for i in 0..P {
-        param_cache[i] = gsl_vector_get(params, i as u64);
-    }
+    let param_cache = copy_from_vector::<P>(params);
 
     let residuals = gsl_multifit_nlinear_residual(workspace);
     let mut chisq = 0.0f64;

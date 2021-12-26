@@ -1,4 +1,5 @@
 #include <gsl_blas.h>
+#include <gsl_bspline.h>
 #include <gsl_errno.h>
 #include <gsl_integration.h>
 #include <gsl_matrix.h>
