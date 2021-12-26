@@ -23,18 +23,15 @@ pub fn nonlinear_fit<
     callback: C,
 ) -> Result<FitResult<P>> {
     unsafe {
-        // Define fit method and parameters
-        let fit_type = gsl_multifit_nlinear_trust;
-
         // Amount of datapoints
         let n = data.len() as u64;
 
         // Allocate workspace
         let workspace = gsl_multifit_nlinear_alloc(
-            fit_type,
+            gsl_multifit_nlinear_trust,
             &hyper_params as *const _,
-            n,        // amount of datapoints
-            P as u64, // amount of parameters
+            n,
+            P as u64,
         );
         assert!(!workspace.is_null());
 
@@ -111,16 +108,16 @@ pub fn nonlinear_fit<
         gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance);
         gsl_matrix_scale(fit_covariance, chisq1 / (n as f64 - P as f64));
 
-        // Calculate variance of data itself
+        // Calculate mean and total sum of squares
         let mean = data.iter().map(|(_, y)| *y).sum::<f64>() / n as f64;
-        let variance = data
+        let tss = data
             .iter()
             .map(|(_, y)| *y)
             .map(|y| (y - mean).powi(2))
             .sum::<f64>();
 
         // R^2 "goodness of fit"
-        let r_squared = 1.0 - chisq1 / variance;
+        let r_squared = 1.0 - chisq1 / tss;
 
         // Extract fitted parameters
         let mut param_cache = [0.0; P];
@@ -281,7 +278,7 @@ impl Default for HyperParams {
 }
 
 #[test]
-fn test_fit() {
+fn test_nlfit_1() {
     disable_error_handler();
 
     for i in 0..10 {
@@ -311,11 +308,13 @@ fn test_fit() {
                 let dmdb = x + a * x.powi(2);
                 Ok([dmda, dmdb])
             },*/
-            |_| {},
+            |callback| {
+                dbg!(callback);
+            },
         )
         .unwrap();
 
-        //dbg!(fit);
+        dbg!(fit);
 
         approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-3);
         approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-3);
@@ -323,7 +322,7 @@ fn test_fit() {
 }
 
 #[test]
-fn test_fit_2() {
+fn test_nlfit_2() {
     disable_error_handler();
 
     fn model(a: f64, b: f64, x: f64) -> f64 {
@@ -352,7 +351,9 @@ fn test_fit_2() {
             let dmdb = (a * x + b).cos();
             Ok([dmda, dmdb])
         },*/
-        |_| {},
+        |callback| {
+            dbg!(callback);
+        },
     )
     .unwrap();
 
@@ -363,7 +364,7 @@ fn test_fit_2() {
 }
 
 #[test]
-fn test_fit_3() {
+fn test_nlfit_3() {
     disable_error_handler();
     fastrand::seed(0);
 
@@ -377,7 +378,7 @@ fn test_fit_3() {
 
     let data = (0..100)
         .map(|x| x as f64 / 100.0 * 3.0)
-        .map(|x| (x, model(a, b, c, x) + 0.2 * (fastrand::f64() * 2.0 - 1.0)))
+        .map(|x| (x, model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0)))
         .collect::<Vec<_>>();
 
     let fit = nonlinear_fit(

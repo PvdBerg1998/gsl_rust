@@ -2,6 +2,7 @@ use std::os::raw::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub mod integration;
+pub mod linear_fit;
 pub mod minimizer;
 pub mod nonlinear_fit;
 
