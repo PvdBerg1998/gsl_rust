@@ -4,6 +4,7 @@ fn main() {
     std::env::remove_var("NUM_JOBS");
     let out = cmake::Config::new(std::fs::canonicalize("./gsl").unwrap())
         .define("NO_AMPL_BINDINGS", "")
+        .profile("Release")
         .build();
 
     let mut lib = out.clone();

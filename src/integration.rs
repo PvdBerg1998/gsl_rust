@@ -30,11 +30,12 @@ pub fn qag<F: FnMut(f64) -> f64>(
     mut f: F,
 ) -> Result<f64> {
     unsafe {
-        let workspace = gsl_integration_workspace_alloc(workspace_size as u64);
-        assert!(!workspace.is_null());
-        let _free_workspace = guard(workspace, |workspace| {
-            gsl_integration_workspace_free(workspace);
-        });
+        let workspace = guard(
+            gsl_integration_workspace_alloc(workspace_size as u64),
+            |workspace| {
+                gsl_integration_workspace_free(workspace);
+            },
+        );
 
         let gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
@@ -45,16 +46,16 @@ pub fn qag<F: FnMut(f64) -> f64>(
         let mut final_abserr = 0.0f64;
 
         let status = gsl_integration_qag(
-            &gsl_f as *const _,
+            &gsl_f,
             a,
             b,
             epsabs,
             epsrel,
             workspace_size as u64,
             rule as c_int,
-            workspace,
-            &mut result as *mut _,
-            &mut final_abserr as *mut _,
+            *workspace,
+            &mut result,
+            &mut final_abserr,
         );
 
         GSLError::from_raw(status)?;
@@ -76,6 +77,7 @@ pub enum GaussKronrodRule {
 #[test]
 fn test_qag65() {
     disable_error_handler();
+
     approx::assert_abs_diff_eq!(
         qag(4, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| x
             .powi(3)

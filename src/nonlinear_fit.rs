@@ -35,31 +35,26 @@ pub fn nonlinear_fit<
     ftol: f64,
     hyper_params: HyperParams,
     p0: [f64; P],
-    data: &[(X, f64)],
+    x: &[X],
+    y: &[f64],
     f: F,
     callback: C,
 ) -> Result<FitResult<P>> {
     unsafe {
         // Amount of datapoints
-        let n = data.len() as u64;
+        assert_eq!(x.len(), y.len());
+        let n = x.len() as u64;
 
         // Allocate workspace
-        let workspace = gsl_multifit_nlinear_alloc(
-            gsl_multifit_nlinear_trust,
-            &hyper_params as *const _,
-            n,
-            P as u64,
+        let workspace = guard(
+            gsl_multifit_nlinear_alloc(gsl_multifit_nlinear_trust, &hyper_params, n, P as u64),
+            |workspace| {
+                gsl_multifit_nlinear_free(workspace);
+            },
         );
-        assert!(!workspace.is_null());
-        let _free_workspace = guard(workspace, |workspace| {
-            gsl_multifit_nlinear_free(workspace);
-        });
 
         // Initial parameter guess
-        let param_guess = alloc_filled_vector(&p0);
-        let _free_param_guess = guard(param_guess, |param_guess| {
-            gsl_vector_free(param_guess);
-        });
+        let param_guess = gsl_vector_from_ref(&p0);
 
         // Information we need inside the trampolines
         let mut ffi_params = FFIParams {
@@ -83,7 +78,7 @@ pub fn nonlinear_fit<
         };
 
         // Init workspace
-        gsl_multifit_nlinear_init(param_guess, &mut fdf as *mut _, workspace);
+        gsl_multifit_nlinear_init(&param_guess, &mut fdf as *mut _, workspace);
 
         // Initial cost function chi^2_0
         let start_residuals = gsl_multifit_nlinear_residual(workspace);

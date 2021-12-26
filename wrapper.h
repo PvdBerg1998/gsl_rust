@@ -8,3 +8,4 @@
 #include <gsl_multifit_nlinear.h>
 #include <gsl_types.h>
 #include <gsl_vector.h>
+#include <gsl_statistics_double.h>
