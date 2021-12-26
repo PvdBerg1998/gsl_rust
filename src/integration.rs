@@ -1,12 +1,13 @@
 use crate::bindings::*;
 use crate::*;
 
-pub fn qag_gk61<F: FnMut(f64) -> f64>(
+pub fn qag<F: FnMut(f64) -> f64>(
     workspace_size: usize,
     a: f64,
     b: f64,
     epsabs: f64,
     epsrel: f64,
+    rule: GaussKronrodRule,
     mut f: F,
 ) -> Result<f64> {
     unsafe {
@@ -28,7 +29,7 @@ pub fn qag_gk61<F: FnMut(f64) -> f64>(
             epsabs,
             epsrel,
             workspace_size as u64,
-            GSL_INTEG_GAUSS61 as c_int,
+            rule as c_int,
             workspace,
             &mut result as *mut _,
             &mut final_abserr as *mut _,
@@ -41,11 +42,25 @@ pub fn qag_gk61<F: FnMut(f64) -> f64>(
     }
 }
 
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum GaussKronrodRule {
+    Gauss15 = GSL_INTEG_GAUSS15,
+    Gauss21 = GSL_INTEG_GAUSS21,
+    Gauss31 = GSL_INTEG_GAUSS31,
+    Gauss41 = GSL_INTEG_GAUSS41,
+    Gauss51 = GSL_INTEG_GAUSS51,
+    Gauss61 = GSL_INTEG_GAUSS61,
+}
+
 #[test]
 fn test_qag65() {
     disable_error_handler();
     approx::assert_abs_diff_eq!(
-        qag_gk61(4, 0.0, 1.0, 1.0e-6, 0.0, |x| x.powi(3) + x).unwrap(),
+        qag(4, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| x
+            .powi(3)
+            + x)
+        .unwrap(),
         0.75,
         epsilon = 1.0e-6
     );
