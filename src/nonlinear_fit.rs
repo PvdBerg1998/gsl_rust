@@ -134,10 +134,13 @@ pub fn nonlinear_fit_ext<
             *workspace,
         );
 
+        // Give user errors priority
         if ffi_params.panicked {
             return Err(GSLError::BadFunction);
         }
-        GSLError::from_raw(ffi_params.error)?; // Could disable this if you want less error checking
+        // This will cause the process to fail, even if the driver returned success
+        // This may not be desired (?)
+        GSLError::from_raw(ffi_params.error)?;
         GSLError::from_raw(status)?;
 
         /*

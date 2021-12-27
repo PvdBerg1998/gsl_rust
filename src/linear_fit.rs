@@ -20,7 +20,7 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
+pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
     x: &[X],
     y: &[f64],
     f: F,
@@ -48,7 +48,8 @@ pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
         let mut covariance = Matrix::zeroes(P, P);
 
         // Prepare linear system matrix: system_ij = f_j(x_i)
-        let system = Matrix::new(x.iter().flat_map(f), n, P);
+        let data = x.iter().map(f).collect::<Result<Vec<[f64; P]>>>()?;
+        let system = Matrix::new(data.into_iter().flatten(), n, P);
 
         // Convert y data to GSL format
         let gsl_y = gsl_vector_from_ref(y);
@@ -102,7 +103,7 @@ fn test_fit_1() {
     let x = (0..100).map(|x| x as f64 / 10.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, c, x)).collect::<Vec<_>>();
 
-    let fit = linear_fit(&x, &y, |&x| [1.0, x, x.powi(2)]).unwrap();
+    let fit = linear_fit(&x, &y, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
 
     dbg!(fit);
 
@@ -130,7 +131,7 @@ fn test_fit_2() {
         .map(|&x| model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0))
         .collect::<Vec<_>>();
 
-    let fit = linear_fit(&x, &y, |&x| [1.0, x, x.powi(2)]).unwrap();
+    let fit = linear_fit(&x, &y, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
 
     dbg!(fit);
 
@@ -144,8 +145,8 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // No data
-    linear_fit(&[], &[], |&x| [1.0, x, x.powi(2)]).unwrap_err();
+    linear_fit(&[], &[], |&x| Ok([1.0, x, x.powi(2)])).unwrap_err();
 
     // No params
-    linear_fit(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], |&_| []).unwrap_err();
+    linear_fit(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], |&_| Ok([])).unwrap_err();
 }

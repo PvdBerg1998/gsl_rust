@@ -51,8 +51,8 @@ pub fn fit_bspline<const NCOEFFS: usize>(
         // Build the linear system and fit it
         let fit = linear_fit(x, y, |&x| {
             // Evaluate all basis splines at this position and store them in b
-            GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), workspace)).unwrap();
-            b.to_array::<NCOEFFS>()
+            GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), workspace))?;
+            Ok(b.to_array::<NCOEFFS>())
         })?;
 
         Ok(BSpline { fit, workspace })
@@ -66,7 +66,11 @@ pub struct BSpline<const NCOEFFS: usize> {
 }
 
 impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
-    pub fn eval(&self, x: &[f64]) -> Box<[(f64, f64)]> {
+    pub fn fit(k: usize, a: f64, b: f64, x: &[f64], y: &[f64]) -> Result<Self> {
+        fit_bspline(k, a, b, x, y)
+    }
+
+    pub fn eval(&self, x: &[f64]) -> Result<Box<[(f64, f64)]>> {
         unsafe {
             let mut b = Vector::zeroes(NCOEFFS);
             let c = gsl_vector_from_ref(&self.fit.params);
@@ -76,8 +80,7 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
                 .copied()
                 .map(|x| {
                     // Evaluate all basis splines at this position and store them in b
-                    GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), self.workspace))
-                        .unwrap();
+                    GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), self.workspace))?;
 
                     // Evaluate fit at this x value
                     let mut y = 0.0f64;
@@ -88,11 +91,27 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
                         &covariance,
                         &mut y,
                         &mut y_err,
-                    ))
-                    .unwrap();
-                    (y, y_err)
+                    ))?;
+                    Ok((y, y_err))
                 })
                 .collect()
+        }
+    }
+
+    pub fn eval_derivatives(&self, x: f64, order: usize) -> Result<Matrix> {
+        unsafe {
+            if order == 0 {
+                return Err(GSLError::Invalid);
+            }
+
+            let mut db = Matrix::zeroes(NCOEFFS, order + 1);
+            GSLError::from_raw(gsl_bspline_deriv_eval(
+                x,
+                order as u64,
+                db.as_gsl_mut(),
+                self.workspace,
+            ))?;
+            Ok(db)
         }
     }
 }
@@ -141,7 +160,7 @@ fn test_bspline_fit_1() {
     assert!(spline.fit.r_squared > 0.99999);
 
     let interpolated_x = (0..1000).map(|x| x as f64 / 1000.0).collect::<Vec<_>>();
-    let interpolated_y = spline.eval(&interpolated_x);
+    let interpolated_y = spline.eval(&interpolated_x).unwrap();
 
     for (x, (interpolated_y, _err)) in interpolated_x.iter().zip(interpolated_y.iter()) {
         let y = model(a, b, *x);
