@@ -26,7 +26,7 @@ pub type HyperParams = gsl_multifit_nlinear_parameters;
 pub fn nonlinear_fit<
     X,
     F: FnMut(&X, [f64; P]) -> Result<f64>,
-    C: FnMut(FitCallback<P>) -> (),
+    C: FnMut(FitCallback<P>),
     const P: usize,
 >(
     max_iter: usize,
@@ -53,13 +53,11 @@ pub fn nonlinear_fit<
             },
         );
 
-        // Initial parameter guess
-        let param_guess = gsl_vector_from_ref(&p0);
-
         // Information we need inside the trampolines
         let mut ffi_params = FFIParams {
             f,
-            data,
+            x,
+            y,
             error: GSL_SUCCESS,
             panicked: false,
         };
@@ -78,13 +76,15 @@ pub fn nonlinear_fit<
         };
 
         // Init workspace
-        gsl_multifit_nlinear_init(&param_guess, &mut fdf as *mut _, workspace);
+        let param_guess = gsl_vector_from_ref(&p0);
+        gsl_multifit_nlinear_init(&param_guess, &mut fdf as *mut _, *workspace);
 
         // Initial cost function chi^2_0
-        let start_residuals = gsl_multifit_nlinear_residual(workspace);
         let mut chisq0 = 0.0f64;
-        gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0 as *mut _);
-        drop(start_residuals);
+        {
+            let start_residuals = gsl_multifit_nlinear_residual(*workspace);
+            gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0 as *mut _);
+        }
 
         let mut _info = 0i32;
         let status = gsl_multifit_nlinear_driver(
@@ -94,8 +94,8 @@ pub fn nonlinear_fit<
             ftol,
             Some(fit_callback::<C, P>),
             &callback as *const _ as *mut c_void,
-            &mut _info as *mut _,
-            workspace,
+            &mut _info,
+            *workspace,
         );
 
         /*
@@ -105,56 +105,37 @@ pub fn nonlinear_fit<
         */
 
         // Numerical fit results
-        let fit_result = gsl_multifit_nlinear_position(workspace);
-        let fit_jacobian = gsl_multifit_nlinear_jac(workspace);
-        let fit_residuals = gsl_multifit_nlinear_residual(workspace);
+        let fit_result = gsl_multifit_nlinear_position(*workspace);
+        let fit_jacobian = gsl_multifit_nlinear_jac(*workspace);
+        let fit_residuals = gsl_multifit_nlinear_residual(*workspace);
 
         // Fit evaluation statistics
-        let fit_niter = gsl_multifit_nlinear_niter(workspace);
+        let fit_niter = gsl_multifit_nlinear_niter(*workspace);
         let fit_neval_f = fdf.nevalf;
 
         // Final cost function chi^2_1
         let mut chisq1 = 0.0f64;
         gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1 as *mut _);
 
-        // Allocate variance-covariance matrix
-        let fit_covariance = gsl_matrix_alloc(P as u64, P as u64);
-        assert!(!fit_covariance.is_null());
-        let _free_covariance = guard(fit_covariance, |fit_covariance| {
-            gsl_matrix_free(fit_covariance);
-        });
-
         // Calculate variance-covariance matrix
-        gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance);
-        gsl_matrix_scale(fit_covariance, chisq1 / (n as f64 - P as f64));
+        let mut fit_covariance = Matrix::zeroes(P, P);
+        gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance.as_gsl_mut());
+        gsl_matrix_scale(fit_covariance.as_gsl_mut(), chisq1 / (n as f64 - P as f64));
 
-        // Calculate mean and total sum of squares
-        let mean = data.iter().map(|(_, y)| *y).sum::<f64>() / n as f64;
-        let tss = data
-            .iter()
-            .map(|(_, y)| *y)
-            .map(|y| (y - mean).powi(2))
-            .sum::<f64>();
-
-        // R^2 "goodness of fit"
-        let r_squared = 1.0 - chisq1 / tss;
-
-        // Extract fitted parameters
-        let param_cache = copy_from_vector::<P>(fit_result);
-
-        // Extract parameter uncertainties
-        let param_sigma_cache = copy_diagonal_from_matrix::<P>(fit_covariance).map(|x| x.sqrt());
+        // Calculate mean and total sum of squares wrt mean
+        let gsl_y = gsl_vector_from_ref(y);
+        let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, n as u64);
+        let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
 
         let result = FitResult {
-            params: param_cache,
-            uncertainties: param_sigma_cache,
+            params: gsl_vector_to_array(fit_result),
+            covariance: fit_covariance.to_2d_array(),
             niter: fit_niter,
             neval_f: fit_neval_f,
             initial_residual_squared: chisq0,
             final_residual_squared: chisq1,
-            final_residual_variance: chisq1 / (n as f64 - P as f64),
             mean,
-            r_squared,
+            r_squared: 1.0 - chisq1 / tss,
         };
 
         if ffi_params.panicked {
@@ -166,9 +147,10 @@ pub fn nonlinear_fit<
     }
 }
 
-struct FFIParams<'a, F, X> {
+struct FFIParams<'a, 'b, F, X> {
     f: F,
-    data: &'a [(X, f64)],
+    x: &'a [X],
+    y: &'b [f64],
     error: i32,
     panicked: bool,
 }
@@ -178,11 +160,11 @@ unsafe extern "C" fn fit_f<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: us
     ffi_params: *mut c_void,
     out: *mut gsl_vector,
 ) -> i32 {
-    let ffi_params: &mut FFIParams<'_, F, X> = &mut *(ffi_params as *mut _);
-    let param_cache = copy_from_vector::<P>(params);
+    let ffi_params: &mut FFIParams<'_, '_, F, X> = &mut *(ffi_params as *mut _);
+    let params = gsl_vector_to_array(params);
 
-    for (i, (x, y)) in ffi_params.data.iter().enumerate() {
-        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.f)(x, param_cache)));
+    for (i, (x, y)) in ffi_params.x.iter().zip(ffi_params.y.iter()).enumerate() {
+        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.f)(x, params)));
         let err = match val {
             Ok(Ok(y)) => y,
             Ok(Err(e)) => {
@@ -212,11 +194,11 @@ unsafe extern "C" fn fit_j<
     ffi_params: *mut c_void,
     out: *mut gsl_matrix,
 ) -> i32 {
-    let ffi_params: &mut FFIParams<'_, F, J, X> = &mut *(ffi_params as *mut _);
-    let param_cache = copy_from_vector::<P>(params);
+    let ffi_params: &mut FFIParams<'_, '_, F, J, X> = &mut *(ffi_params as *mut _);
+    let params = gsl_vector_to_array(params);
 
-    for (i, (x, _y)) in ffi_params.data.iter().enumerate() {
-        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.j)(x, param_cache)));
+    for (i, x) in ffi_params.x.iter().enumerate() {
+        let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.j)(x, params)));
 
         let dvs = match val {
             Ok(Ok(dvs)) => dvs,
@@ -240,13 +222,12 @@ unsafe extern "C" fn fit_j<
 }
 */
 
-unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize>(
+unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>), const P: usize>(
     iter: u64,
     callback: *mut c_void,
     workspace: *const gsl_multifit_nlinear_workspace,
 ) {
     let params = gsl_multifit_nlinear_position(workspace);
-    let param_cache = copy_from_vector::<P>(params);
 
     let residuals = gsl_multifit_nlinear_residual(workspace);
     let mut chisq = 0.0f64;
@@ -259,7 +240,7 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>) -> (), const P: usize
     let _ = catch_unwind(AssertUnwindSafe(|| {
         callback(FitCallback {
             iter: iter as usize,
-            params: param_cache,
+            params: gsl_vector_to_array(params),
             cond: 1.0 / rcond,
             residual_squared: chisq,
         });
@@ -277,12 +258,11 @@ pub struct FitCallback<const P: usize> {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FitResult<const P: usize> {
     pub params: [f64; P],
-    pub uncertainties: [f64; P],
+    pub covariance: [[f64; P]; P],
     pub niter: u64,
     pub neval_f: u64,
     pub initial_residual_squared: f64,
     pub final_residual_squared: f64,
-    pub final_residual_variance: f64,
     pub mean: f64,
     pub r_squared: f64,
 }
@@ -305,10 +285,8 @@ fn test_nlfit_1() {
         let a = 1.0 + i as f64;
         let b = 1.0 + i as f64;
 
-        let data = (0..1000)
-            .map(|x| x as f64 / 100.0)
-            .map(|x| (x, model(a, b, x)))
-            .collect::<Vec<_>>();
+        let x = (0..1000).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
+        let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
         let fit = nonlinear_fit(
             1000,
@@ -317,7 +295,8 @@ fn test_nlfit_1() {
             1.0e-9,
             HyperParams::default(),
             [10.0, 5.0],
-            &data,
+            &x,
+            &y,
             |&x, [a, b]| Ok(model(a, b, x)),
             |callback| {
                 dbg!(callback);
@@ -343,10 +322,8 @@ fn test_nlfit_2() {
     let a = 10.0;
     let b = 2.0;
 
-    let data = (0..100)
-        .map(|x| x as f64 / 100.0)
-        .map(|x| (x, model(a, b, x)))
-        .collect::<Vec<_>>();
+    let x = (0..100).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
+    let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
     let fit = nonlinear_fit(
         1000,
@@ -355,7 +332,8 @@ fn test_nlfit_2() {
         1.0e-9,
         HyperParams::default(),
         [9.0, 1.0],
-        &data,
+        &x,
+        &y,
         |&x, [a, b]| Ok(model(a, b, x)),
         |callback| {
             dbg!(callback);
@@ -382,9 +360,10 @@ fn test_nlfit_3() {
     let b = 1.5;
     let c = 1.0;
 
-    let data = (0..100)
-        .map(|x| x as f64 / 100.0 * 3.0)
-        .map(|x| (x, model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0)))
+    let x = (0..100).map(|x| x as f64 / 100.0 * 3.0).collect::<Vec<_>>();
+    let y = x
+        .iter()
+        .map(|&x| model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0))
         .collect::<Vec<_>>();
 
     let fit = nonlinear_fit(
@@ -394,7 +373,8 @@ fn test_nlfit_3() {
         1.0e-9,
         HyperParams::default(),
         [1.0, 1.0, 0.0],
-        &data,
+        &x,
+        &y,
         |&x, [a, b, c]| Ok(model(a, b, c, x)),
         |callback| {
             dbg!(callback);
@@ -419,7 +399,8 @@ fn test_nlfit_panic() {
         1.0e-9,
         HyperParams::default(),
         [1.0],
-        &[(0, 0.0), (1, 1.0), (2, 2.0)],
+        &[0, 1, 2],
+        &[0.0; 3],
         |_, [_]| panic!(),
         |callback| {
             dbg!(callback);
@@ -441,7 +422,8 @@ fn test_nlfit_error() {
         1.0e-9,
         HyperParams::default(),
         [1.0],
-        &[(0, 0.0), (1, 1.0), (2, 2.0)],
+        &[0, 1, 2],
+        &[0.0; 3],
         |_, [_]| Err(GSLError::Fault),
         |callback| {
             dbg!(callback);

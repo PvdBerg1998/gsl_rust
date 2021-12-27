@@ -23,7 +23,7 @@ pub mod bspline;
 pub mod integration;
 pub mod linear_fit;
 pub mod minimizer;
-//pub mod nonlinear_fit;
+pub mod nonlinear_fit;
 
 mod data;
 pub use data::*;

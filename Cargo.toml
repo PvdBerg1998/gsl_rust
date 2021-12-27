@@ -1,6 +1,7 @@
 [package]
 name = "gsl_rust"
-author = "Pim van den Berg"
+authors = ["Pim van den Berg"]
+license-file = "LICENSE"
 version = "0.1.0"
 edition = "2021"
 
