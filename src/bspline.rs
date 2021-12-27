@@ -52,7 +52,7 @@ pub fn fit_bspline(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Resul
         let ncoeffs = gsl_bspline_ncoeffs(workspace) as usize;
 
         // Calculate knots associated with breakpoints
-        let gsl_breakpoints = gsl_vector_from_ref(breakpoints);
+        let gsl_breakpoints = gsl_vector::from(breakpoints);
         GSLError::from_raw(gsl_bspline_knots(&gsl_breakpoints, workspace))?;
 
         // Cache vector for basis spline values
@@ -66,17 +66,7 @@ pub fn fit_bspline(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Resul
             Ok(())
         })?;
 
-        let covariance_cache = Matrix::new(
-            fit.covariance.iter().map(|x| x.iter().copied()).flatten(),
-            ncoeffs,
-            ncoeffs,
-        );
-
-        Ok(BSpline {
-            fit,
-            workspace,
-            covariance_cache,
-        })
+        Ok(BSpline { fit, workspace })
     }
 }
 
@@ -84,7 +74,6 @@ pub struct BSpline {
     pub fit: FitResult,
     // We own the associated workspace as it contains a nontrivial amount of data
     workspace: *mut gsl_bspline_workspace,
-    covariance_cache: Matrix,
 }
 
 impl BSpline {
@@ -98,7 +87,8 @@ impl BSpline {
 
             let mut db = Matrix::zeroes(ncoeffs, DV + 1);
             let mut b = Vector::zeroes(ncoeffs);
-            let c = gsl_vector_from_ref(&self.fit.params);
+            let c = gsl_vector::from(self.fit.params.as_ref());
+            let covariance = gsl_matrix::from_slice(&self.fit.covariance, ncoeffs, ncoeffs);
 
             let mut y = vec![0.0; x.len()].into_boxed_slice();
             let mut y_err = vec![0.0; x.len()].into_boxed_slice();
@@ -120,7 +110,7 @@ impl BSpline {
                 GSLError::from_raw(gsl_multifit_linear_est(
                     b.as_gsl(),
                     &c,
-                    self.covariance_cache.as_gsl(),
+                    &covariance,
                     &mut y[i],
                     &mut y_err[i],
                 ))?;
@@ -131,7 +121,7 @@ impl BSpline {
                     GSLError::from_raw(gsl_multifit_linear_est(
                         b.as_gsl(),
                         &c,
-                        self.covariance_cache.as_gsl(),
+                        &covariance,
                         &mut dv[i][j],
                         &mut dv_err[i][j],
                     ))?;

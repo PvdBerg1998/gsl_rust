@@ -104,7 +104,7 @@ pub fn nonlinear_fit_ext<
         };
 
         // Init workspace
-        let param_guess = gsl_vector_from_ref(&p0);
+        let param_guess = gsl_vector::from(p0.as_slice());
         GSLError::from_raw(gsl_multifit_nlinear_init(
             &param_guess,
             &mut fdf,
@@ -175,12 +175,12 @@ pub fn nonlinear_fit_ext<
         ))?;
 
         // Calculate mean and total sum of squares wrt mean
-        let gsl_y = gsl_vector_from_ref(y);
+        let gsl_y = gsl_vector::from(y);
         let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, n as u64);
         let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
 
         let result = FitResult {
-            params: gsl_vector_to_array(fit_result),
+            params: gsl_vector::to_array(fit_result),
             covariance: fit_covariance.to_2d_array(),
             niter: fit_niter,
             neval_f: fit_neval_f,
@@ -208,7 +208,7 @@ unsafe extern "C" fn fit_f<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: us
     out: *mut gsl_vector,
 ) -> i32 {
     let ffi_params: &mut FFIParams<'_, '_, F, X> = &mut *(ffi_params as *mut _);
-    let params = gsl_vector_to_array(params);
+    let params = gsl_vector::to_array(params);
 
     for (i, (x, y)) in ffi_params.x.iter().zip(ffi_params.y.iter()).enumerate() {
         let val = catch_unwind(AssertUnwindSafe(|| (ffi_params.f)(x, params)));
@@ -292,7 +292,7 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>), const P: usize>(
     let _ = catch_unwind(AssertUnwindSafe(|| {
         callback(FitCallback {
             iter: iter as usize,
-            params: gsl_vector_to_array(params),
+            params: gsl_vector::to_array(params),
             cond: 1.0 / rcond,
             residual_squared: chisq,
         });

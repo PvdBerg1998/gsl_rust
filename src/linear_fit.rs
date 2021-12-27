@@ -83,7 +83,7 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
         let system = Matrix::new(data.into_iter().flatten(), n, p);
 
         // Convert y data to GSL format
-        let gsl_y = gsl_vector_from_ref(y);
+        let gsl_y = gsl_vector::from(y);
 
         // Solve the linear system using SVD
         let mut chisq = 0.0f64;
@@ -102,7 +102,7 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
 
         Ok(FitResult {
             params: c.to_boxed_slice(),
-            covariance: covariance.to_2d_boxed_slice(),
+            covariance: covariance.to_boxed_slice(),
             residual_squared: chisq,
             mean,
             r_squared: 1.0 - chisq / tss,
@@ -113,7 +113,7 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
 #[derive(Clone, Debug, PartialEq)]
 pub struct FitResult {
     pub params: Box<[f64]>,
-    pub covariance: Box<[Box<[f64]>]>,
+    pub covariance: Box<[f64]>,
     pub residual_squared: f64,
     pub mean: f64,
     pub r_squared: f64,
