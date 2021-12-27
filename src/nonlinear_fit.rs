@@ -41,6 +41,13 @@ pub fn nonlinear_fit<
     callback: C,
 ) -> Result<FitResult<P>> {
     unsafe {
+        if P == 0 {
+            return Err(GSLError::Invalid);
+        }
+        if x.len() == 0 || y.len() == 0 {
+            return Err(GSLError::Invalid);
+        }
+
         // Amount of datapoints
         assert_eq!(x.len(), y.len());
         let n = x.len() as u64;
@@ -52,6 +59,7 @@ pub fn nonlinear_fit<
                 gsl_multifit_nlinear_free(workspace);
             },
         );
+        assert!(!workspace.is_null());
 
         // Information we need inside the trampolines
         let mut ffi_params = FFIParams {
@@ -141,11 +149,9 @@ pub fn nonlinear_fit<
         if ffi_params.panicked {
             return Err(GSLError::BadFunction);
         }
-        if let Err(e) = GSLError::from_raw(status) {
-            // Give preference to a more specific user defined error
-            GSLError::from_raw(ffi_params.error)?;
-            return Err(e);
-        }
+        GSLError::from_raw(status)?;
+        // Could disable this if you want less error checking
+        GSLError::from_raw(ffi_params.error)?;
         Ok(result)
     }
 }
@@ -435,4 +441,60 @@ fn test_nlfit_error() {
     .unwrap_err();
 
     assert_eq!(fit, GSLError::Fault);
+}
+
+#[test]
+fn test_invalid_params() {
+    disable_error_handler();
+
+    // No iterations
+    nonlinear_fit(
+        0,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [1.0],
+        &[0, 1, 2],
+        &[0.0; 3],
+        |_, [_]| Ok(0.0),
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap_err();
+
+    // No parameters
+    nonlinear_fit(
+        1000,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [],
+        &[0, 1, 2],
+        &[0.0; 3],
+        |_, []| Ok(0.0),
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap_err();
+
+    // No data
+    nonlinear_fit(
+        0,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        [1.0],
+        &[],
+        &[],
+        |_: &(), [_]| Ok(0.0),
+        |callback| {
+            dbg!(callback);
+        },
+    )
+    .unwrap_err();
 }

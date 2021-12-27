@@ -26,6 +26,13 @@ pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
     f: F,
 ) -> Result<FitResult<P>> {
     unsafe {
+        if P == 0 {
+            return Err(GSLError::Invalid);
+        }
+        if x.len() == 0 || y.len() == 0 {
+            return Err(GSLError::Invalid);
+        }
+
         // Amount of datapoints
         assert_eq!(x.len(), y.len());
         let n = x.len();
@@ -34,6 +41,7 @@ pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
         let workspace = guard(gsl_multifit_linear_alloc(n as u64, P as u64), |workspace| {
             gsl_multifit_linear_free(workspace);
         });
+        assert!(!workspace.is_null());
 
         // Prepare storage
         let mut c = Vector::zeroes(P);
@@ -132,4 +140,15 @@ fn test_fit_2() {
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-2);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-2);
     approx::assert_abs_diff_eq!(fit.params[2], c, epsilon = 1.0e-2);
+}
+
+#[test]
+fn test_invalid_params() {
+    disable_error_handler();
+
+    // No data
+    linear_fit(&[], &[], |&x| [1.0, x, x.powi(2)]).unwrap_err();
+
+    // No params
+    linear_fit(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], |&_| []).unwrap_err();
 }

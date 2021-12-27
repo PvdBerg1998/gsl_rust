@@ -22,17 +22,25 @@ use linear_fit::*;
 use std::fmt;
 
 pub fn fit_bspline<const NCOEFFS: usize>(
-    k: u64,
+    k: usize,
     a: f64,
     b: f64,
     x: &[f64],
     y: &[f64],
 ) -> Result<BSpline<NCOEFFS>> {
     unsafe {
-        let nbreak = NCOEFFS as u64 + 2 - k;
+        if k == 0 {
+            return Err(GSLError::Invalid);
+        }
+        if NCOEFFS <= 2 || NCOEFFS - 2 <= k {
+            return Err(GSLError::Invalid);
+        }
+
+        let nbreak = NCOEFFS as u64 + 2 - k as u64;
 
         // Allocate workspace
-        let workspace = gsl_bspline_alloc(k, nbreak);
+        let workspace = gsl_bspline_alloc(k as u64, nbreak);
+        assert!(!workspace.is_null());
 
         // Calculate knots associated with uniformly distributed breakpoints
         gsl_bspline_knots_uniform(a, b, workspace);
@@ -126,4 +134,21 @@ fn test_bspline_fit_1() {
         let y = model(a, b, *x);
         approx::assert_abs_diff_eq!(y, interpolated_y, epsilon = 1.0e-2);
     }
+}
+
+#[test]
+fn test_invalid_params() {
+    disable_error_handler();
+
+    // 0th order spline
+    fit_bspline::<10>(0, 0.0, 1.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+
+    // Too few coefficients
+    fit_bspline::<1>(4, 0.0, 1.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+
+    // No data
+    fit_bspline::<10>(4, 0.0, 1.0, &[], &[]).unwrap_err();
+
+    // Empty domain
+    fit_bspline::<1>(4, 0.0, 0.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 }

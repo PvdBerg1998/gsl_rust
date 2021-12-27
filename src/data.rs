@@ -24,6 +24,8 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 pub fn gsl_vector_from_ref(data: &[f64]) -> gsl_vector {
+    assert!(data.len() > 0);
+
     let size = data.len() as u64;
     gsl_vector {
         size,
@@ -46,9 +48,6 @@ pub unsafe fn gsl_vector_to_array<const N: usize>(v: *const gsl_vector) -> [f64;
     } = *v;
 
     assert_eq!(N as u64, size);
-    if N == 0 {
-        return [0.0; N];
-    }
 
     if stride == 1 {
         // We can just copy the whole block in one go
@@ -64,6 +63,9 @@ pub unsafe fn gsl_vector_to_array<const N: usize>(v: *const gsl_vector) -> [f64;
 }
 
 pub fn gsl_matrix_from_ref<const M: usize, const N: usize>(data: &[[f64; N]; M]) -> gsl_matrix {
+    assert!(M > 0);
+    assert!(N > 0);
+
     gsl_matrix {
         size1: M as u64,
         size2: N as u64,
@@ -90,9 +92,6 @@ pub unsafe fn gsl_matrix_to_2d_array<const M: usize, const N: usize>(
 
     assert_eq!(M as u64, size1);
     assert_eq!(N as u64, size2);
-    if N == 0 && M == 0 {
-        return [[0.0; N]; M];
-    }
 
     if tda == N as u64 {
         // We can just copy the whole block in one go
@@ -122,6 +121,8 @@ pub struct Vector {
 impl Vector {
     pub fn new<T: IntoIterator<Item = f64>>(data: T) -> Self {
         let data = data.into_iter().collect::<Box<[f64]>>();
+        assert!(data.len() > 0);
+
         let size = data.len() as u64;
         let data = Box::into_raw(data);
 
@@ -233,6 +234,9 @@ impl Matrix {
     pub fn new<T: IntoIterator<Item = f64>>(data: T, m: usize, n: usize) -> Self {
         let data = data.into_iter().collect::<Box<[f64]>>();
         assert_eq!(m * n, data.len());
+        assert!(m > 0);
+        assert!(n > 0);
+
         let data = Box::into_raw(data);
 
         let gsl = gsl_matrix {
@@ -467,4 +471,34 @@ fn miri_test_gsl_matrix_wrapper() {
         let m3 = Box::new(m2);
         assert_eq!(old_ptr, (*m3.as_gsl()).data);
     }
+}
+
+#[test]
+#[should_panic]
+fn test_zero_sized_vector() {
+    Vector::new([]);
+}
+
+#[test]
+#[should_panic]
+fn test_zero_sized_vector_ref() {
+    gsl_vector_from_ref(&[]);
+}
+
+#[test]
+#[should_panic]
+fn test_zero_sized_matrix() {
+    Matrix::new([], 0, 0);
+}
+
+#[test]
+#[should_panic]
+fn test_zero_sized_matrix_ref() {
+    gsl_matrix_from_ref::<0, 0>(&[]);
+}
+
+#[test]
+#[should_panic]
+fn test_zero_sized_matrix_ref2() {
+    gsl_matrix_from_ref(&[[], []]);
 }

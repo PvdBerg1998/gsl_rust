@@ -30,12 +30,17 @@ pub fn qag<F: FnMut(f64) -> f64>(
     mut f: F,
 ) -> Result<f64> {
     unsafe {
+        if workspace_size == 0 {
+            return Err(GSLError::Invalid);
+        }
+
         let workspace = guard(
             gsl_integration_workspace_alloc(workspace_size as u64),
             |workspace| {
                 gsl_integration_workspace_free(workspace);
             },
         );
+        assert!(!workspace.is_null());
 
         let gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
@@ -86,4 +91,15 @@ fn test_qag65() {
         0.75,
         epsilon = 1.0e-6
     );
+}
+
+#[test]
+fn test_invalid_params() {
+    disable_error_handler();
+
+    // Empty workspace
+    qag(0, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| {
+        x.powi(3) + x
+    })
+    .unwrap_err();
 }

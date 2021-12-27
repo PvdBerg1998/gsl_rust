@@ -37,6 +37,7 @@ pub fn minimize<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback)>(
                 gsl_min_fminimizer_free(minimizer);
             },
         );
+        assert!(!minimizer.is_null());
 
         let mut gsl_f = gsl_function_struct {
             function: Some(trampoline::<F>),
@@ -95,4 +96,18 @@ fn test_minimizer() {
         std::f64::consts::PI * 3.0 / 2.0,
         epsilon = 1.0e-6
     );
+}
+
+#[test]
+fn test_invalid_params() {
+    disable_error_handler();
+
+    // No iterations
+    minimize(0, 1.0, 6.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
+
+    // Empty domain
+    minimize(100, 0.0, 0.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
+
+    // Nonsense guess
+    minimize(0, 1.0, 6.0, std::f64::NAN, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
 }
