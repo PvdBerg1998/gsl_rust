@@ -207,7 +207,7 @@ unsafe extern "C" fn fit_f<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: us
             }
             Err(_) => {
                 ffi_params.panicked = true;
-                return GSLError::BadFunction.into();
+                return GSL_EBADFUNC;
             }
         } - *y;
         gsl_vector_set(out, i as u64, err);
@@ -242,7 +242,7 @@ unsafe extern "C" fn fit_j<
             }
             Err(_) => {
                 ffi_params.panicked = true;
-                return GSLError::BadFunction.into();
+                return GSL_EBADFUNC;
             }
         };
 
