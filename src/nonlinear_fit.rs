@@ -319,6 +319,12 @@ pub struct FitResult<const P: usize> {
     pub r_squared: f64,
 }
 
+impl<const P: usize> FitResult<P> {
+    pub fn uncertainty(&self, i: usize) -> f64 {
+        self.covariance[i][i].sqrt()
+    }
+}
+
 impl Default for HyperParams {
     fn default() -> Self {
         unsafe { gsl_multifit_nlinear_default_parameters() }

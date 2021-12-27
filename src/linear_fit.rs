@@ -119,6 +119,16 @@ pub struct FitResult {
     pub r_squared: f64,
 }
 
+impl FitResult {
+    pub fn covariance(&self, i: usize, j: usize) -> f64 {
+        (self.covariance)[i * self.params.len() + j]
+    }
+
+    pub fn uncertainty(&self, i: usize) -> f64 {
+        self.covariance(i, i).sqrt()
+    }
+}
+
 /*
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FitResultP<const P: usize> {
