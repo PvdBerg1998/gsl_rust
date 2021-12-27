@@ -21,6 +21,7 @@ use crate::*;
 use linear_fit::*;
 use std::fmt;
 
+/// `k + 1` is equal to the spline order
 pub fn fit_bspline<const NCOEFFS: usize>(
     k: usize,
     a: f64,
@@ -98,20 +99,57 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
         }
     }
 
-    pub fn eval_derivatives(&self, x: f64, order: usize) -> Result<Matrix> {
+    /// Returns y, y_err, dv, dv_err
+    pub fn eval_derivative(&self, x: &[f64]) -> Result<Box<[(f64, f64, f64, f64)]>> {
         unsafe {
-            if order == 0 {
-                return Err(GSLError::Invalid);
-            }
+            // 0th and 1st derivatives
+            let order = 2;
 
-            let mut db = Matrix::zeroes(NCOEFFS, order + 1);
-            GSLError::from_raw(gsl_bspline_deriv_eval(
-                x,
-                order as u64,
-                db.as_gsl_mut(),
-                self.workspace,
-            ))?;
-            Ok(db)
+            let mut db = Matrix::zeroes(NCOEFFS, order);
+            let mut b = Vector::zeroes(NCOEFFS);
+            let c = gsl_vector_from_ref(&self.fit.params);
+            let covariance = gsl_matrix_from_ref(&self.fit.covariance);
+
+            x.iter()
+                .copied()
+                .map(|x| {
+                    // Evaluate all basis splines and their derivatives at this position,
+                    // and store them in db.
+                    GSLError::from_raw(gsl_bspline_deriv_eval(
+                        x,
+                        1,
+                        db.as_gsl_mut(),
+                        self.workspace,
+                    ))?;
+
+                    // Since we calculated the 0th derivative as well,
+                    // we also return it
+                    gsl_matrix_get_col(b.as_gsl_mut(), db.as_gsl(), 0);
+                    let mut y = 0.0f64;
+                    let mut y_err = 0.0f64;
+                    GSLError::from_raw(gsl_multifit_linear_est(
+                        b.as_gsl(),
+                        &c,
+                        &covariance,
+                        &mut y,
+                        &mut y_err,
+                    ))?;
+
+                    // Then, get the first derivative
+                    gsl_matrix_get_col(b.as_gsl_mut(), db.as_gsl(), 1);
+                    let mut dv = 0.0f64;
+                    let mut dv_err = 0.0f64;
+                    GSLError::from_raw(gsl_multifit_linear_est(
+                        b.as_gsl(),
+                        &c,
+                        &covariance,
+                        &mut dv,
+                        &mut dv_err,
+                    ))?;
+
+                    Ok((y, y_err, dv, dv_err))
+                })
+                .collect()
         }
     }
 }
@@ -147,6 +185,10 @@ fn test_bspline_fit_1() {
         (a * x + b).sin()
     }
 
+    fn model_dv(a: f64, b: f64, x: f64) -> f64 {
+        a * (a * x + b).cos()
+    }
+
     let a = 10.0;
     let b = 2.0;
 
@@ -159,12 +201,23 @@ fn test_bspline_fit_1() {
 
     assert!(spline.fit.r_squared > 0.99999);
 
+    // Check interpolation accuracy
     let interpolated_x = (0..1000).map(|x| x as f64 / 1000.0).collect::<Vec<_>>();
     let interpolated_y = spline.eval(&interpolated_x).unwrap();
-
     for (x, (interpolated_y, _err)) in interpolated_x.iter().zip(interpolated_y.iter()) {
         let y = model(a, b, *x);
         approx::assert_abs_diff_eq!(y, interpolated_y, epsilon = 1.0e-2);
+    }
+
+    // Check derivative
+    let derivative = spline.eval_derivative(&x).unwrap();
+    for (x, (spline_y, _y_err, spline_dv, _dv_err)) in x.iter().zip(derivative.iter()) {
+        let y = model(a, b, *x);
+        let dv = model_dv(a, b, *x);
+
+        // Derivative amplifies any fitting errors so we have to be a bit more lenient
+        approx::assert_abs_diff_eq!(y, spline_y, epsilon = 1.0e-2);
+        approx::assert_abs_diff_eq!(dv, spline_dv, epsilon = 0.3);
     }
 }
 
