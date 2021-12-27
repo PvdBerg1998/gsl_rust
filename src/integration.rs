@@ -54,7 +54,7 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
         let mut result = 0.0f64;
         let mut final_abserr = 0.0f64;
 
-        let status = gsl_integration_qag(
+        GSLError::from_raw(gsl_integration_qag(
             &gsl_f,
             a,
             b,
@@ -65,9 +65,8 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
             *workspace,
             &mut result,
             &mut final_abserr,
-        );
+        ))?;
 
-        GSLError::from_raw(status)?;
         Ok(result)
     }
 }

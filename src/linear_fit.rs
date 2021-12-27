@@ -55,29 +55,26 @@ pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
 
         // Solve the linear system using SVD
         let mut chisq = 0.0f64;
-        let status = gsl_multifit_linear(
+        GSLError::from_raw(gsl_multifit_linear(
             system.as_gsl(),
             &gsl_y,
             c.as_gsl_mut(),
             covariance.as_gsl_mut(),
             &mut chisq,
             *workspace,
-        );
+        ))?;
 
         // Calculate mean and total sum of squares wrt mean
         let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, n as u64);
         let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
 
-        let result = FitResult {
+        Ok(FitResult {
             params: c.to_array(),
             covariance: covariance.to_2d_array(),
             residual_squared: chisq,
             mean,
             r_squared: 1.0 - chisq / tss,
-        };
-
-        GSLError::from_raw(status)?;
-        Ok(result)
+        })
     }
 }
 

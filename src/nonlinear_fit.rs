@@ -105,13 +105,17 @@ pub fn nonlinear_fit_ext<
 
         // Init workspace
         let param_guess = gsl_vector_from_ref(&p0);
-        gsl_multifit_nlinear_init(&param_guess, &mut fdf, *workspace);
+        GSLError::from_raw(gsl_multifit_nlinear_init(
+            &param_guess,
+            &mut fdf,
+            *workspace,
+        ))?;
 
         // Initial cost function chi^2_0
         let mut chisq0 = 0.0f64;
         {
             let start_residuals = gsl_multifit_nlinear_residual(*workspace);
-            gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0);
+            GSLError::from_raw(gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0))?;
         }
 
         let mut _info = 0i32;
@@ -130,6 +134,12 @@ pub fn nonlinear_fit_ext<
             *workspace,
         );
 
+        if ffi_params.panicked {
+            return Err(GSLError::BadFunction);
+        }
+        GSLError::from_raw(ffi_params.error)?; // Could disable this if you want less error checking
+        GSLError::from_raw(status)?;
+
         /*
 
              Extract fit information
@@ -147,12 +157,19 @@ pub fn nonlinear_fit_ext<
 
         // Final cost function chi^2_1
         let mut chisq1 = 0.0f64;
-        gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1);
+        GSLError::from_raw(gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1))?;
 
         // Calculate variance-covariance matrix
         let mut fit_covariance = Matrix::zeroes(P, P);
-        gsl_multifit_nlinear_covar(fit_jacobian, 0.0, fit_covariance.as_gsl_mut());
-        gsl_matrix_scale(fit_covariance.as_gsl_mut(), chisq1 / (n as f64 - P as f64));
+        GSLError::from_raw(gsl_multifit_nlinear_covar(
+            fit_jacobian,
+            0.0,
+            fit_covariance.as_gsl_mut(),
+        ))?;
+        GSLError::from_raw(gsl_matrix_scale(
+            fit_covariance.as_gsl_mut(),
+            chisq1 / (n as f64 - P as f64),
+        ))?;
 
         // Calculate mean and total sum of squares wrt mean
         let gsl_y = gsl_vector_from_ref(y);
@@ -170,12 +187,6 @@ pub fn nonlinear_fit_ext<
             r_squared: 1.0 - chisq1 / tss,
         };
 
-        if ffi_params.panicked {
-            return Err(GSLError::BadFunction);
-        }
-        // Could disable this if you want less error checking
-        GSLError::from_raw(ffi_params.error)?;
-        GSLError::from_raw(status)?;
         Ok(result)
     }
 }
@@ -270,10 +281,10 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>), const P: usize>(
 
     let residuals = gsl_multifit_nlinear_residual(workspace);
     let mut chisq = 0.0f64;
-    gsl_blas_ddot(residuals, residuals, &mut chisq);
+    let _ = gsl_blas_ddot(residuals, residuals, &mut chisq);
 
     let mut rcond = 0.0;
-    gsl_multifit_nlinear_rcond(&mut rcond, workspace);
+    let _ = gsl_multifit_nlinear_rcond(&mut rcond, workspace);
 
     let _ = catch_unwind(AssertUnwindSafe(|| {
         callback(FitCallback {

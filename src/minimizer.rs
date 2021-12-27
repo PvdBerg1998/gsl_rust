@@ -53,13 +53,11 @@ pub fn minimize_ext<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback)>(
             params: &mut f as *mut _ as *mut _,
         };
 
-        let status = gsl_min_fminimizer_set(*minimizer, &mut gsl_f, x0, a, b);
-        GSLError::from_raw(status)?;
+        GSLError::from_raw(gsl_min_fminimizer_set(*minimizer, &mut gsl_f, x0, a, b))?;
 
         let mut iter = 0;
         loop {
-            let status = gsl_min_fminimizer_iterate(*minimizer);
-            GSLError::from_raw(status)?;
+            GSLError::from_raw(gsl_min_fminimizer_iterate(*minimizer))?;
 
             let x_lower = gsl_min_fminimizer_x_lower(*minimizer);
             let x_upper = gsl_min_fminimizer_x_upper(*minimizer);
@@ -75,8 +73,7 @@ pub fn minimize_ext<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback)>(
                 minimum: (x, y),
             });
 
-            let status = gsl_min_test_interval(x_lower, x_upper, epsabs, epsrel);
-            if GSLError::from_raw(status).is_ok() {
+            if gsl_min_test_interval(x_lower, x_upper, epsabs, epsrel) == GSL_SUCCESS {
                 return Ok(x);
             }
 

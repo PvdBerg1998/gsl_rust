@@ -43,7 +43,7 @@ pub fn fit_bspline<const NCOEFFS: usize>(
         assert!(!workspace.is_null());
 
         // Calculate knots associated with uniformly distributed breakpoints
-        gsl_bspline_knots_uniform(a, b, workspace);
+        GSLError::from_raw(gsl_bspline_knots_uniform(a, b, workspace))?;
 
         // Cache vector for basis spline values
         let mut b = Vector::zeroes(NCOEFFS);
@@ -51,7 +51,7 @@ pub fn fit_bspline<const NCOEFFS: usize>(
         // Build the linear system and fit it
         let fit = linear_fit(x, y, |&x| {
             // Evaluate all basis splines at this position and store them in b
-            gsl_bspline_eval(x, b.as_gsl_mut(), workspace);
+            GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), workspace)).unwrap();
             b.to_array::<NCOEFFS>()
         })?;
 
@@ -76,12 +76,20 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
                 .copied()
                 .map(|x| {
                     // Evaluate all basis splines at this position and store them in b
-                    gsl_bspline_eval(x, b.as_gsl_mut(), self.workspace);
+                    GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), self.workspace))
+                        .unwrap();
 
                     // Evaluate fit at this x value
                     let mut y = 0.0f64;
                     let mut y_err = 0.0f64;
-                    gsl_multifit_linear_est(b.as_gsl(), &c, &covariance, &mut y, &mut y_err);
+                    GSLError::from_raw(gsl_multifit_linear_est(
+                        b.as_gsl(),
+                        &c,
+                        &covariance,
+                        &mut y,
+                        &mut y_err,
+                    ))
+                    .unwrap();
                     (y, y_err)
                 })
                 .collect()

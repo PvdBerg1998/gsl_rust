@@ -326,6 +326,12 @@ impl Clone for Matrix {
     }
 }
 
+impl<const M: usize, const N: usize> From<[[f64; N]; M]> for Matrix {
+    fn from(data: [[f64; N]; M]) -> Self {
+        Matrix::new(data.into_iter().flatten(), M, N)
+    }
+}
+
 impl Drop for Matrix {
     fn drop(&mut self) {
         unsafe {
