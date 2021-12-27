@@ -61,6 +61,7 @@ pub fn fit_bspline<const NCOEFFS: usize>(
 
 pub struct BSpline<const NCOEFFS: usize> {
     pub fit: FitResult<NCOEFFS>,
+    // We own the associated workspace as it contains a nontrivial amount of data
     workspace: *mut gsl_bspline_workspace,
 }
 
@@ -104,6 +105,10 @@ impl<const NCOEFFS: usize> Drop for BSpline<NCOEFFS> {
         }
     }
 }
+
+// GSL is thread safe
+unsafe impl<const NCOEFFS: usize> Send for BSpline<NCOEFFS> {}
+unsafe impl<const NCOEFFS: usize> Sync for BSpline<NCOEFFS> {}
 
 #[test]
 fn test_bspline_fit_1() {
