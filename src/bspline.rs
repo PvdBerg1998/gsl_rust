@@ -21,62 +21,84 @@ use crate::*;
 use linear_fit::*;
 use std::fmt;
 
-/// `k + 1` is equal to the spline order
-pub fn fit_bspline<const NCOEFFS: usize>(
+pub fn fit_bspline_uniform(
     k: usize,
     a: f64,
     b: f64,
+    nbreak: usize,
     x: &[f64],
     y: &[f64],
-) -> Result<BSpline<NCOEFFS>> {
+) -> Result<BSpline> {
+    // Create uniform breakpoint division
+    let dx = (b - a) / nbreak as f64;
+    let breakpoints = (0..=nbreak).map(|i| i as f64 * dx).collect::<Vec<_>>();
+    fit_bspline(k, &breakpoints, x, y)
+}
+
+/// `k + 1` is equal to the spline order
+pub fn fit_bspline(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Result<BSpline> {
     unsafe {
         if k == 0 {
             return Err(GSLError::Invalid);
         }
-        if NCOEFFS <= 2 || NCOEFFS - 2 <= k {
+
+        if breakpoints.len() <= 2 {
             return Err(GSLError::Invalid);
         }
 
-        let nbreak = NCOEFFS as u64 + 2 - k as u64;
-
         // Allocate workspace
-        let workspace = gsl_bspline_alloc(k as u64, nbreak);
+        let workspace = gsl_bspline_alloc(k as u64, breakpoints.len() as u64);
         assert!(!workspace.is_null());
+        let ncoeffs = gsl_bspline_ncoeffs(workspace) as usize;
 
-        // Calculate knots associated with uniformly distributed breakpoints
-        GSLError::from_raw(gsl_bspline_knots_uniform(a, b, workspace))?;
+        // Calculate knots associated with breakpoints
+        let gsl_breakpoints = gsl_vector_from_ref(breakpoints);
+        GSLError::from_raw(gsl_bspline_knots(&gsl_breakpoints, workspace))?;
 
         // Cache vector for basis spline values
-        let mut b = Vector::zeroes(NCOEFFS);
+        let mut b = Vector::zeroes(ncoeffs);
 
         // Build the linear system and fit it
-        let fit = linear_fit(x, y, |&x| {
+        let fit = linear_fit(ncoeffs, x, y, |&x, p| {
             // Evaluate all basis splines at this position and store them in b
             GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), workspace))?;
-            Ok(b.to_array::<NCOEFFS>())
+            p.copy_from_slice(&b);
+            Ok(())
         })?;
 
-        Ok(BSpline { fit, workspace })
+        let covariance_cache = Matrix::new(
+            fit.covariance.iter().map(|x| x.iter().copied()).flatten(),
+            ncoeffs,
+            ncoeffs,
+        );
+
+        Ok(BSpline {
+            fit,
+            workspace,
+            covariance_cache,
+        })
     }
 }
 
-pub struct BSpline<const NCOEFFS: usize> {
-    pub fit: FitResult<NCOEFFS>,
+pub struct BSpline {
+    pub fit: FitResult,
     // We own the associated workspace as it contains a nontrivial amount of data
     workspace: *mut gsl_bspline_workspace,
+    covariance_cache: Matrix,
 }
 
-impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
-    pub fn fit(k: usize, a: f64, b: f64, x: &[f64], y: &[f64]) -> Result<Self> {
-        fit_bspline(k, a, b, x, y)
+impl BSpline {
+    pub fn fit(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Result<Self> {
+        fit_bspline(k, breakpoints, x, y)
     }
 
     pub fn eval<const DV: usize>(&self, x: &[f64]) -> Result<BSplineEvaluation<DV>> {
         unsafe {
-            let mut db = Matrix::zeroes(NCOEFFS, DV + 1);
-            let mut b = Vector::zeroes(NCOEFFS);
+            let ncoeffs = gsl_bspline_ncoeffs(self.workspace) as usize;
+
+            let mut db = Matrix::zeroes(ncoeffs, DV + 1);
+            let mut b = Vector::zeroes(ncoeffs);
             let c = gsl_vector_from_ref(&self.fit.params);
-            let covariance = gsl_matrix_from_ref(&self.fit.covariance);
 
             let mut y = vec![0.0; x.len()].into_boxed_slice();
             let mut y_err = vec![0.0; x.len()].into_boxed_slice();
@@ -98,7 +120,7 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
                 GSLError::from_raw(gsl_multifit_linear_est(
                     b.as_gsl(),
                     &c,
-                    &covariance,
+                    self.covariance_cache.as_gsl(),
                     &mut y[i],
                     &mut y_err[i],
                 ))?;
@@ -109,7 +131,7 @@ impl<const NCOEFFS: usize> BSpline<NCOEFFS> {
                     GSLError::from_raw(gsl_multifit_linear_est(
                         b.as_gsl(),
                         &c,
-                        &covariance,
+                        self.covariance_cache.as_gsl(),
                         &mut dv[i][j],
                         &mut dv_err[i][j],
                     ))?;
@@ -134,16 +156,15 @@ pub struct BSplineEvaluation<const DV: usize> {
     pub dv_err: Box<[[f64; DV]]>,
 }
 
-impl<const NCOEFFS: usize> fmt::Debug for BSpline<NCOEFFS> {
+impl fmt::Debug for BSpline {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BSpline")
-            .field("NCOEFFS", &NCOEFFS)
             .field("fit", &self.fit)
             .finish_non_exhaustive()
     }
 }
 
-impl<const NCOEFFS: usize> Drop for BSpline<NCOEFFS> {
+impl Drop for BSpline {
     fn drop(&mut self) {
         unsafe {
             gsl_bspline_free(self.workspace);
@@ -152,14 +173,12 @@ impl<const NCOEFFS: usize> Drop for BSpline<NCOEFFS> {
 }
 
 // GSL is thread safe
-unsafe impl<const NCOEFFS: usize> Send for BSpline<NCOEFFS> {}
-unsafe impl<const NCOEFFS: usize> Sync for BSpline<NCOEFFS> {}
+unsafe impl Send for BSpline {}
+unsafe impl Sync for BSpline {}
 
 #[test]
 fn test_bspline_fit_1() {
     disable_error_handler();
-
-    const NCOEFFS: usize = 12;
 
     fn model(a: f64, b: f64, x: f64) -> f64 {
         (a * x + b).sin()
@@ -175,7 +194,7 @@ fn test_bspline_fit_1() {
     let x = (0..100).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
-    let spline = fit_bspline::<NCOEFFS>(4, 0.0, 1.0, &x, &y).unwrap();
+    let spline = fit_bspline_uniform(4, 0.0, 1.0, 10, &x, &y).unwrap();
 
     dbg!(&spline);
 
@@ -203,14 +222,16 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // 0th order spline
-    fit_bspline::<10>(0, 0.0, 1.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline_uniform(0, 0.0, 1.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 
-    // Too few coefficients
-    fit_bspline::<1>(4, 0.0, 1.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    // Too few breakpoints
+    fit_bspline(4, &[], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline(4, &[0.0], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline(4, &[0.0, 1.0], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 
     // No data
-    fit_bspline::<10>(4, 0.0, 1.0, &[], &[]).unwrap_err();
+    fit_bspline_uniform(4, 0.0, 1.0, 10, &[], &[]).unwrap_err();
 
     // Empty domain
-    fit_bspline::<1>(4, 0.0, 0.0, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline_uniform(4, 0.0, 0.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 }

@@ -153,6 +153,10 @@ impl Vector {
         unsafe { *(self.data as *const [f64; N]) }
     }
 
+    pub fn to_boxed_slice(&self) -> Box<[f64]> {
+        self.deref().to_owned().into_boxed_slice()
+    }
+
     pub fn as_gsl(&self) -> *const gsl_vector {
         self.gsl
     }
@@ -282,6 +286,16 @@ impl Matrix {
 
         // Safety: we checked the dimensions and the memory layout is the same as a 1d array
         unsafe { *(self.data as *const _ as *const [[f64; N]; M]) }
+    }
+
+    pub fn to_2d_boxed_slice(&self) -> Box<[Box<[f64]>]> {
+        let mut out = vec![vec![0.0; self.n].into_boxed_slice(); self.m].into_boxed_slice();
+        for i in 0..self.m {
+            for j in 0..self.n {
+                out[i][j] = self.elem_ij(i, j);
+            }
+        }
+        out
     }
 
     pub fn as_gsl(&self) -> *const gsl_matrix {
@@ -433,11 +447,13 @@ fn test_gsl_matrix_wrapper() {
         let m2 = Matrix::new(arr.iter().flatten().copied(), 2, 3);
         assert_eq!(gsl_matrix_equal(m, m2.as_gsl()), 1);
         assert_eq!(m2.to_2d_array::<2, 3>(), arr);
+        let runtime_m2 = m2.to_2d_boxed_slice();
 
         // Check Rust wrapper elements
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(m2.elem_ij(i, j), arr[i][j]);
+                assert_eq!(runtime_m2[i][j], arr[i][j]);
             }
         }
 
@@ -471,6 +487,14 @@ fn miri_test_gsl_matrix_wrapper() {
         let mut m2 = Matrix::new(arr.iter().flatten().copied(), 2, 3);
         let _1 = m2.as_gsl_mut();
         let _2 = m2.as_gsl_mut();
+        let runtime_m2 = m2.to_2d_boxed_slice();
+
+        for i in 0..2 {
+            for j in 0..3 {
+                assert_eq!(m2.elem_ij(i, j), arr[i][j]);
+                assert_eq!(runtime_m2[i][j], arr[i][j]);
+            }
+        }
 
         // Moving the wrapper should not matter
         let old_ptr = (*m2.as_gsl()).data;

@@ -20,13 +20,37 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
+/*
+
+    Linear fitting does not make use of const generics,
+    because it is used as a tool for e.g. BSpline fitting.
+    This requires a runtime amount of parameters.
+    Also, these applications can require a relatively large amount of parameters,
+    making stack allocation less attractive.
+    The convenience function `linear_fit_p` is available to add compile time checking to `f`.
+
+*/
+
+pub fn linear_fit_p<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
     x: &[X],
     y: &[f64],
-    f: F,
-) -> Result<FitResult<P>> {
+    mut f: F,
+) -> Result<FitResult> {
+    linear_fit(P, x, y, |x, p| {
+        let params = f(x)?;
+        p.copy_from_slice(&params);
+        Ok(())
+    })
+}
+
+pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
+    p: usize,
+    x: &[X],
+    y: &[f64],
+    mut f: F,
+) -> Result<FitResult> {
     unsafe {
-        if P == 0 {
+        if p == 0 {
             return Err(GSLError::Invalid);
         }
         if x.len() == 0 || y.len() == 0 {
@@ -38,18 +62,25 @@ pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
         let n = x.len();
 
         // Allocate workspace
-        let workspace = guard(gsl_multifit_linear_alloc(n as u64, P as u64), |workspace| {
+        let workspace = guard(gsl_multifit_linear_alloc(n as u64, p as u64), |workspace| {
             gsl_multifit_linear_free(workspace);
         });
         assert!(!workspace.is_null());
 
         // Prepare storage
-        let mut c = Vector::zeroes(P);
-        let mut covariance = Matrix::zeroes(P, P);
+        let mut c = Vector::zeroes(p);
+        let mut covariance = Matrix::zeroes(p, p);
 
         // Prepare linear system matrix: system_ij = f_j(x_i)
-        let data = x.iter().map(f).collect::<Result<Vec<[f64; P]>>>()?;
-        let system = Matrix::new(data.into_iter().flatten(), n, P);
+        let data = x
+            .iter()
+            .map(|x| {
+                let mut p = vec![0.0; p];
+                f(x, &mut p)?;
+                Ok(p)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let system = Matrix::new(data.into_iter().flatten(), n, p);
 
         // Convert y data to GSL format
         let gsl_y = gsl_vector_from_ref(y);
@@ -70,8 +101,8 @@ pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
         let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
 
         Ok(FitResult {
-            params: c.to_array(),
-            covariance: covariance.to_2d_array(),
+            params: c.to_boxed_slice(),
+            covariance: covariance.to_2d_boxed_slice(),
             residual_squared: chisq,
             mean,
             r_squared: 1.0 - chisq / tss,
@@ -79,14 +110,25 @@ pub fn linear_fit<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct FitResult {
+    pub params: Box<[f64]>,
+    pub covariance: Box<[Box<[f64]>]>,
+    pub residual_squared: f64,
+    pub mean: f64,
+    pub r_squared: f64,
+}
+
+/*
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct FitResult<const P: usize> {
+pub struct FitResultP<const P: usize> {
     pub params: [f64; P],
     pub covariance: [[f64; P]; P],
     pub residual_squared: f64,
     pub mean: f64,
     pub r_squared: f64,
 }
+*/
 
 #[test]
 fn test_fit_1() {
@@ -103,9 +145,13 @@ fn test_fit_1() {
     let x = (0..100).map(|x| x as f64 / 10.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, c, x)).collect::<Vec<_>>();
 
-    let fit = linear_fit(&x, &y, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
+    let fit = linear_fit(3, &x, &y, |&x, p| {
+        p.copy_from_slice(&[1.0, x, x.powi(2)]);
+        Ok(())
+    })
+    .unwrap();
 
-    dbg!(fit);
+    dbg!(&fit);
 
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-6);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-6);
@@ -131,9 +177,13 @@ fn test_fit_2() {
         .map(|&x| model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0))
         .collect::<Vec<_>>();
 
-    let fit = linear_fit(&x, &y, |&x| Ok([1.0, x, x.powi(2)])).unwrap();
+    let fit = linear_fit(3, &x, &y, |&x, p| {
+        p.copy_from_slice(&[1.0, x, x.powi(2)]);
+        Ok(())
+    })
+    .unwrap();
 
-    dbg!(fit);
+    dbg!(&fit);
 
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-2);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-2);
@@ -145,8 +195,12 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // No data
-    linear_fit(&[], &[], |&x| Ok([1.0, x, x.powi(2)])).unwrap_err();
+    linear_fit(3, &[], &[], |&x, p| {
+        p.copy_from_slice(&[1.0, x, x.powi(2)]);
+        Ok(())
+    })
+    .unwrap_err();
 
     // No params
-    linear_fit(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], |&_| Ok([])).unwrap_err();
+    linear_fit(0, &[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], |&_, _| Ok(())).unwrap_err();
 }
