@@ -371,6 +371,32 @@ fn test_gsl_vector_wrapper() {
 }
 
 #[test]
+fn miri_test_gsl_vector_wrapper() {
+    unsafe {
+        // Define test array
+        let arr = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+
+        // Convert a Rust array reference to a GSL vector
+        let vr = gsl_vector_from_ref(&arr);
+        let _vr = gsl_vector_from_ref(&arr);
+
+        // Convert back and check equality
+        let arr2 = gsl_vector_to_array::<10>(&vr);
+        assert_eq!(arr, arr2);
+
+        // Construct the same vector using the Rust wrapper
+        let mut v2 = Vector::new(arr);
+        let _1 = v2.as_gsl_mut();
+        let _2 = v2.as_gsl_mut();
+
+        // Moving the wrapper should not matter
+        let old_ptr = (*v2.as_gsl()).data;
+        let v3 = Box::new(v2);
+        assert_eq!(old_ptr, (*v3.as_gsl()).data);
+    }
+}
+
+#[test]
 fn test_gsl_matrix_wrapper() {
     unsafe {
         // Initialize a MxN = 2x3 matrix entirely using GSL
@@ -414,5 +440,31 @@ fn test_gsl_matrix_wrapper() {
         assert_eq!(old_ptr, (*m3.as_gsl()).data);
 
         gsl_matrix_free(m);
+    }
+}
+
+#[test]
+fn miri_test_gsl_matrix_wrapper() {
+    unsafe {
+        // Define test matrix
+        let arr = [[0.0, 1.0, 2.0], [10.0, 11.0, 12.0]];
+
+        // Convert a Rust array reference to a GSL matrix
+        let mr = gsl_matrix_from_ref::<2, 3>(&arr);
+        let _mr = gsl_matrix_from_ref::<2, 3>(&arr);
+
+        // Convert back and check equality
+        let arr2 = gsl_matrix_to_2d_array::<2, 3>(&mr);
+        assert_eq!(arr, arr2);
+
+        // Construct the same matrix using the Rust wrapper
+        let mut m2 = Matrix::new(arr.iter().flatten().copied(), 2, 3);
+        let _1 = m2.as_gsl_mut();
+        let _2 = m2.as_gsl_mut();
+
+        // Moving the wrapper should not matter
+        let old_ptr = (*m2.as_gsl()).data;
+        let m3 = Box::new(m2);
+        assert_eq!(old_ptr, (*m3.as_gsl()).data);
     }
 }
