@@ -20,7 +20,11 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn qag<F: FnMut(f64) -> f64>(
+pub fn qag<F: FnMut(f64) -> f64>(a: f64, b: f64, f: F) -> Result<f64> {
+    qag_ext(16, a, b, 1.0e-9, 0.0, GaussKronrodRule::Gauss15, f)
+}
+
+pub fn qag_ext<F: FnMut(f64) -> f64>(
     workspace_size: usize,
     a: f64,
     b: f64,
@@ -84,7 +88,7 @@ fn test_qag65() {
     disable_error_handler();
 
     approx::assert_abs_diff_eq!(
-        qag(4, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| x
+        qag_ext(4, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| x
             .powi(3)
             + x)
         .unwrap(),
@@ -98,7 +102,7 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // Empty workspace
-    qag(0, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| {
+    qag_ext(0, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| {
         x.powi(3) + x
     })
     .unwrap_err();

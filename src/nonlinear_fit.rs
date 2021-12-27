@@ -29,6 +29,31 @@ pub fn nonlinear_fit<
     C: FnMut(FitCallback<P>),
     const P: usize,
 >(
+    p0: [f64; P],
+    x: &[X],
+    y: &[f64],
+    f: F,
+) -> Result<FitResult<P>> {
+    nonlinear_fit_ext(
+        100,
+        1.0e-9,
+        1.0e-9,
+        1.0e-9,
+        HyperParams::default(),
+        p0,
+        x,
+        y,
+        f,
+        |_| {},
+    )
+}
+
+pub fn nonlinear_fit_ext<
+    X,
+    F: FnMut(&X, [f64; P]) -> Result<f64>,
+    C: FnMut(FitCallback<P>),
+    const P: usize,
+>(
     max_iter: usize,
     xtol: f64,
     gtol: f64,
@@ -297,7 +322,7 @@ fn test_nlfit_1() {
         let x = (0..1000).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
         let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
-        let fit = nonlinear_fit(
+        let fit = nonlinear_fit_ext(
             1000,
             1.0e-9,
             1.0e-9,
@@ -334,7 +359,7 @@ fn test_nlfit_2() {
     let x = (0..100).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
-    let fit = nonlinear_fit(
+    let fit = nonlinear_fit_ext(
         1000,
         1.0e-9,
         1.0e-9,
@@ -375,7 +400,7 @@ fn test_nlfit_3() {
         .map(|&x| model(a, b, c, x) + 0.068 * (fastrand::f64() * 2.0 - 1.0))
         .collect::<Vec<_>>();
 
-    let fit = nonlinear_fit(
+    let fit = nonlinear_fit_ext(
         1000,
         1.0e-9,
         1.0e-9,
@@ -401,7 +426,7 @@ fn test_nlfit_3() {
 fn test_nlfit_panic() {
     disable_error_handler();
 
-    let fit = nonlinear_fit(
+    let fit = nonlinear_fit_ext(
         1000,
         1.0e-9,
         1.0e-9,
@@ -424,7 +449,7 @@ fn test_nlfit_panic() {
 fn test_nlfit_error() {
     disable_error_handler();
 
-    let fit = nonlinear_fit(
+    let fit = nonlinear_fit_ext(
         1000,
         1.0e-9,
         1.0e-9,
@@ -448,7 +473,7 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // No iterations
-    nonlinear_fit(
+    nonlinear_fit_ext(
         0,
         1.0e-9,
         1.0e-9,
@@ -465,7 +490,7 @@ fn test_invalid_params() {
     .unwrap_err();
 
     // No parameters
-    nonlinear_fit(
+    nonlinear_fit_ext(
         1000,
         1.0e-9,
         1.0e-9,
@@ -482,7 +507,7 @@ fn test_invalid_params() {
     .unwrap_err();
 
     // No data
-    nonlinear_fit(
+    nonlinear_fit_ext(
         0,
         1.0e-9,
         1.0e-9,

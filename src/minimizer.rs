@@ -21,6 +21,15 @@ use crate::*;
 use drop_guard::guard;
 
 pub fn minimize<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback)>(
+    a: f64,
+    b: f64,
+    x0: f64,
+    f: F,
+) -> Result<f64> {
+    minimize_ext(100, a, b, x0, 1.0e-9, 0.0, f, |_| {})
+}
+
+pub fn minimize_ext<F: FnMut(f64) -> f64, C: FnMut(MinimizerCallback)>(
     max_iter: usize,
     a: f64,
     b: f64,
@@ -92,7 +101,7 @@ fn test_minimizer() {
     disable_error_handler();
 
     approx::assert_abs_diff_eq!(
-        minimize(100, 1.0, 6.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap(),
+        minimize_ext(100, 1.0, 6.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap(),
         std::f64::consts::PI * 3.0 / 2.0,
         epsilon = 1.0e-6
     );
@@ -103,11 +112,11 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // No iterations
-    minimize(0, 1.0, 6.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
+    minimize_ext(0, 1.0, 6.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
 
     // Empty domain
-    minimize(100, 0.0, 0.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
+    minimize_ext(100, 0.0, 0.0, 4.0, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
 
     // Nonsense guess
-    minimize(0, 1.0, 6.0, std::f64::NAN, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
+    minimize_ext(0, 1.0, 6.0, std::f64::NAN, 1.0e-6, 0.0, |x| x.sin(), |_| {}).unwrap_err();
 }
