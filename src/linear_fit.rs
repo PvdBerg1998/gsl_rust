@@ -64,7 +64,6 @@ pub fn linear_fit<X, F: FnMut(&X) -> [f64; P], const P: usize>(
             params: c.to_array(),
             covariance: covariance.to_2d_array(),
             residual_squared: chisq,
-            residual_variance: chisq / (n as f64 - P as f64),
             mean,
             r_squared: 1.0 - chisq / tss,
         };
@@ -79,7 +78,6 @@ pub struct FitResult<const P: usize> {
     pub params: [f64; P],
     pub covariance: [[f64; P]; P],
     pub residual_squared: f64,
-    pub residual_variance: f64,
     pub mean: f64,
     pub r_squared: f64,
 }

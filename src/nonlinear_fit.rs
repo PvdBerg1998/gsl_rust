@@ -141,8 +141,11 @@ pub fn nonlinear_fit<
         if ffi_params.panicked {
             return Err(GSLError::BadFunction);
         }
-        GSLError::from_raw(ffi_params.error)?;
-        GSLError::from_raw(status)?;
+        if let Err(e) = GSLError::from_raw(status) {
+            // Give preference to a more specific user defined error
+            GSLError::from_raw(ffi_params.error)?;
+            return Err(e);
+        }
         Ok(result)
     }
 }
