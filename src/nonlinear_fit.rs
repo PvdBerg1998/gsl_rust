@@ -39,7 +39,7 @@ pub fn nonlinear_fit<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: usize>(
         x,
         y,
         f,
-        |_| {},
+        None::<fn(FitCallback<P>)>,
     )
 }
 
@@ -58,7 +58,7 @@ pub fn nonlinear_fit_ext<
     x: &[X],
     y: &[f64],
     f: F,
-    callback: C,
+    mut callback: Option<C>,
 ) -> Result<FitResult<P>> {
     unsafe {
         if P == 0 {
@@ -105,13 +105,13 @@ pub fn nonlinear_fit_ext<
 
         // Init workspace
         let param_guess = gsl_vector_from_ref(&p0);
-        gsl_multifit_nlinear_init(&param_guess, &mut fdf as *mut _, *workspace);
+        gsl_multifit_nlinear_init(&param_guess, &mut fdf, *workspace);
 
         // Initial cost function chi^2_0
         let mut chisq0 = 0.0f64;
         {
             let start_residuals = gsl_multifit_nlinear_residual(*workspace);
-            gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0 as *mut _);
+            gsl_blas_ddot(start_residuals, start_residuals, &mut chisq0);
         }
 
         let mut _info = 0i32;
@@ -120,8 +120,12 @@ pub fn nonlinear_fit_ext<
             xtol,
             gtol,
             ftol,
-            Some(fit_callback::<C, P>),
-            &callback as *const _ as *mut c_void,
+            if callback.is_some() {
+                Some(fit_callback::<C, P>)
+            } else {
+                None
+            },
+            &mut callback as *mut _ as *mut c_void,
             &mut _info,
             *workspace,
         );
@@ -143,7 +147,7 @@ pub fn nonlinear_fit_ext<
 
         // Final cost function chi^2_1
         let mut chisq1 = 0.0f64;
-        gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1 as *mut _);
+        gsl_blas_ddot(fit_residuals, fit_residuals, &mut chisq1);
 
         // Calculate variance-covariance matrix
         let mut fit_covariance = Matrix::zeroes(P, P);
@@ -256,16 +260,21 @@ unsafe extern "C" fn fit_callback<C: FnMut(FitCallback<P>), const P: usize>(
     callback: *mut c_void,
     workspace: *const gsl_multifit_nlinear_workspace,
 ) {
+    let callback: &mut Option<C> = &mut *(callback as *mut _);
+    let callback = match callback {
+        Some(callback) => callback,
+        None => std::hint::unreachable_unchecked(),
+    };
+
     let params = gsl_multifit_nlinear_position(workspace);
 
     let residuals = gsl_multifit_nlinear_residual(workspace);
     let mut chisq = 0.0f64;
-    gsl_blas_ddot(residuals, residuals, &mut chisq as *mut _);
+    gsl_blas_ddot(residuals, residuals, &mut chisq);
 
     let mut rcond = 0.0;
-    gsl_multifit_nlinear_rcond(&mut rcond as *mut _, workspace);
+    gsl_multifit_nlinear_rcond(&mut rcond, workspace);
 
-    let callback: &mut C = &mut *(callback as *mut _);
     let _ = catch_unwind(AssertUnwindSafe(|| {
         callback(FitCallback {
             iter: iter as usize,
@@ -327,9 +336,9 @@ fn test_nlfit_1() {
             &x,
             &y,
             |&x, [a, b]| Ok(model(a, b, x)),
-            |callback| {
+            Some(|callback| {
                 dbg!(callback);
-            },
+            }),
         )
         .unwrap();
 
@@ -364,9 +373,9 @@ fn test_nlfit_2() {
         &x,
         &y,
         |&x, [a, b]| Ok(model(a, b, x)),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap();
 
@@ -405,9 +414,9 @@ fn test_nlfit_3() {
         &x,
         &y,
         |&x, [a, b, c]| Ok(model(a, b, c, x)),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap();
 
@@ -431,9 +440,9 @@ fn test_nlfit_panic() {
         &[0, 1, 2],
         &[0.0; 3],
         |_, [_]| panic!(),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap_err();
 
@@ -454,9 +463,9 @@ fn test_nlfit_error() {
         &[0, 1, 2],
         &[0.0; 3],
         |_, [_]| Err(GSLError::Fault),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap_err();
 
@@ -478,9 +487,9 @@ fn test_invalid_params() {
         &[0, 1, 2],
         &[0.0; 3],
         |_, [_]| Ok(0.0),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap_err();
 
@@ -495,9 +504,9 @@ fn test_invalid_params() {
         &[0, 1, 2],
         &[0.0; 3],
         |_, []| Ok(0.0),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap_err();
 
@@ -512,9 +521,9 @@ fn test_invalid_params() {
         &[],
         &[],
         |_: &(), [_]| Ok(0.0),
-        |callback| {
+        Some(|callback| {
             dbg!(callback);
-        },
+        }),
     )
     .unwrap_err();
 }
