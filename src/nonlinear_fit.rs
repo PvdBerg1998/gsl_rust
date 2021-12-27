@@ -23,12 +23,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub type HyperParams = gsl_multifit_nlinear_parameters;
 
-pub fn nonlinear_fit<
-    X,
-    F: FnMut(&X, [f64; P]) -> Result<f64>,
-    C: FnMut(FitCallback<P>),
-    const P: usize,
->(
+pub fn nonlinear_fit<X, F: FnMut(&X, [f64; P]) -> Result<f64>, const P: usize>(
     p0: [f64; P],
     x: &[X],
     y: &[f64],
@@ -174,9 +169,9 @@ pub fn nonlinear_fit_ext<
         if ffi_params.panicked {
             return Err(GSLError::BadFunction);
         }
-        GSLError::from_raw(status)?;
         // Could disable this if you want less error checking
         GSLError::from_raw(ffi_params.error)?;
+        GSLError::from_raw(status)?;
         Ok(result)
     }
 }
