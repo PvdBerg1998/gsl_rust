@@ -144,11 +144,12 @@ pub struct BSplineEvaluation<const DV: usize> {
 impl<const DV: usize> BSplineEvaluation<DV> {
     pub fn dv_flat(&self) -> &[f64] {
         // Safety: [[T; N], [T; N], ...] is equal to [T; M*N]
+        // For DV=0 the pointer will still be aligned thanks to Box
         unsafe { std::slice::from_raw_parts(self.dv.as_ptr() as *const _, self.dv.len() * DV) }
     }
 
     pub fn dv_err_flat(&self) -> &[f64] {
-        // Safety: [[T; N], [T; N], ...] is equal to [T; M*N]
+        // Safety: see dv_flat
         unsafe {
             std::slice::from_raw_parts(self.dv_err.as_ptr() as *const _, self.dv_err.len() * DV)
         }
@@ -235,6 +236,15 @@ fn miri_test_bspline_eval_flat() {
     };
     assert_eq!(eval.dv_flat(), &[0.0, 0.0, 1.0, 1.0, 2.0, 2.0]);
     assert_eq!(eval.dv_err_flat(), &[0.0, 0.0, 1.0, 1.0, 2.0, 2.0]);
+
+    let eval = BSplineEvaluation {
+        y: vec![].into_boxed_slice(),
+        y_err: vec![].into_boxed_slice(),
+        dv: vec![[]].into_boxed_slice(),
+        dv_err: vec![[]].into_boxed_slice(),
+    };
+    assert_eq!(eval.dv_flat(), &[]);
+    assert_eq!(eval.dv_err_flat(), &[]);
 }
 
 #[test]
