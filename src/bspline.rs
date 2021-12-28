@@ -44,7 +44,9 @@ pub fn fit_bspline(
         let ncoeffs = gsl_bspline_ncoeffs(workspace) as usize;
 
         // Calculate knots
-        // For a closed curve:
+        // The domain is equal to [x_k, x_{n-k}]
+        // Thus if we want to pass through a and b,
+        // we need to have k repetitions of the first and last knot.
         // knots(1:k) = a
         // knots(k+1:k+l-1) = a + i*delta, i = 1 .. l - 1
         // knots(n+1:n+k) = b
