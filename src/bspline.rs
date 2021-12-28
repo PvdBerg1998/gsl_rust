@@ -21,7 +21,8 @@ use crate::*;
 use linear_fit::*;
 use std::fmt;
 
-pub fn fit_bspline_uniform(
+/// `k + 1` is equal to the spline order
+pub fn fit_bspline(
     k: usize,
     a: f64,
     b: f64,
@@ -29,31 +30,25 @@ pub fn fit_bspline_uniform(
     x: &[f64],
     y: &[f64],
 ) -> Result<BSpline> {
-    // Create uniform breakpoint division
-    let dx = (b - a) / nbreak as f64;
-    let breakpoints = (0..=nbreak).map(|i| i as f64 * dx).collect::<Vec<_>>();
-    fit_bspline(k, &breakpoints, x, y)
-}
-
-/// `k + 1` is equal to the spline order
-pub fn fit_bspline(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Result<BSpline> {
     unsafe {
         if k == 0 {
             return Err(GSLError::Invalid);
         }
-
-        if breakpoints.len() <= 2 {
+        if nbreak < 2 {
             return Err(GSLError::Invalid);
         }
 
         // Allocate workspace
-        let workspace = gsl_bspline_alloc(k as u64, breakpoints.len() as u64);
+        let workspace = gsl_bspline_alloc(k as u64, nbreak as u64);
         assert!(!workspace.is_null());
         let ncoeffs = gsl_bspline_ncoeffs(workspace) as usize;
 
-        // Calculate knots associated with breakpoints
-        let gsl_breakpoints = gsl_vector::from(breakpoints);
-        GSLError::from_raw(gsl_bspline_knots(&gsl_breakpoints, workspace))?;
+        // Calculate knots
+        // For a closed curve:
+        // knots(1:k) = a
+        // knots(k+1:k+l-1) = a + i*delta, i = 1 .. l - 1
+        // knots(n+1:n+k) = b
+        GSLError::from_raw(gsl_bspline_knots_uniform(a, b, workspace))?;
 
         // Cache vector for basis spline values
         let mut b = Vector::zeroes(ncoeffs);
@@ -77,8 +72,8 @@ pub struct BSpline {
 }
 
 impl BSpline {
-    pub fn fit(k: usize, breakpoints: &[f64], x: &[f64], y: &[f64]) -> Result<Self> {
-        fit_bspline(k, breakpoints, x, y)
+    pub fn fit(k: usize, a: f64, b: f64, nbreak: usize, x: &[f64], y: &[f64]) -> Result<Self> {
+        fit_bspline(k, a, b, nbreak, x, y)
     }
 
     pub fn eval<const DV: usize>(&self, x: &[f64]) -> Result<BSplineEvaluation<DV>> {
@@ -146,6 +141,18 @@ pub struct BSplineEvaluation<const DV: usize> {
     pub dv_err: Box<[[f64; DV]]>,
 }
 
+impl BSplineEvaluation<1> {
+    pub fn dv_flat(&self) -> &[f64] {
+        // Safety: [T; 1] has the same layout at T
+        unsafe { std::slice::from_raw_parts(self.dv.as_ptr() as *const _, self.dv.len()) }
+    }
+
+    pub fn dv_err_flat(&self) -> &[f64] {
+        // Safety: [T; 1] has the same layout at T
+        unsafe { std::slice::from_raw_parts(self.dv.as_ptr() as *const _, self.dv.len()) }
+    }
+}
+
 impl fmt::Debug for BSpline {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BSpline")
@@ -184,7 +191,7 @@ fn test_bspline_fit_1() {
     let x = (0..100).map(|x| x as f64 / 100.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, x)).collect::<Vec<_>>();
 
-    let spline = fit_bspline_uniform(4, 0.0, 1.0, 10, &x, &y).unwrap();
+    let spline = fit_bspline(4, 0.0, 1.0, 10, &x, &y).unwrap();
 
     dbg!(&spline);
 
@@ -208,20 +215,30 @@ fn test_bspline_fit_1() {
 }
 
 #[test]
+fn miri_test_bspline_eval_flat() {
+    let eval = BSplineEvaluation {
+        y: vec![].into_boxed_slice(),
+        y_err: vec![].into_boxed_slice(),
+        dv: vec![[0.0], [1.0], [2.0]].into_boxed_slice(),
+        dv_err: vec![[0.0], [1.0], [2.0]].into_boxed_slice(),
+    };
+    assert_eq!(eval.dv_flat(), &[0.0, 1.0, 2.0]);
+    assert_eq!(eval.dv_err_flat(), &[0.0, 1.0, 2.0]);
+}
+
+#[test]
 fn test_invalid_params() {
     disable_error_handler();
 
     // 0th order spline
-    fit_bspline_uniform(0, 0.0, 1.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline(0, 0.0, 1.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 
     // Too few breakpoints
-    fit_bspline(4, &[], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
-    fit_bspline(4, &[0.0], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
-    fit_bspline(4, &[0.0, 1.0], &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline(4, 0.0, 1.0, 1, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 
     // No data
-    fit_bspline_uniform(4, 0.0, 1.0, 10, &[], &[]).unwrap_err();
+    fit_bspline(4, 0.0, 1.0, 10, &[], &[]).unwrap_err();
 
     // Empty domain
-    fit_bspline_uniform(4, 0.0, 0.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
+    fit_bspline(4, 0.0, 0.0, 10, &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]).unwrap_err();
 }

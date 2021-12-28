@@ -16,6 +16,9 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#![warn(clippy::all)]
+#![allow(clippy::too_many_arguments)]
+
 use std::os::raw::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -26,7 +29,7 @@ pub mod minimizer;
 pub mod nonlinear_fit;
 
 mod data;
-pub use data::*;
+pub(crate) use data::*;
 mod error;
 pub use error::*;
 

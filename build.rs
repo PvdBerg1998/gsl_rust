@@ -48,10 +48,9 @@ fn main() {
 
         writeln!(
             &mut f,
-            "{}",
-            "extern \"C\" {\n\
+            "extern \"C\" {{\n\
             \x20   pub fn gsl_vector_sum(a: *const gsl_vector) -> f64;\n\
-            }"
+            }}"
         )
         .unwrap();
     }

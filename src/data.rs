@@ -16,6 +16,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#![allow(dead_code)]
+
 use crate::bindings::*;
 use std::fmt;
 use std::iter::FromIterator;
@@ -23,7 +25,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-pub struct Vector {
+pub(crate) struct Vector {
     // We own this data on the heap via Box.
     // It is stored as a pointer to avoid aliasing issues when handing out a *mut
     // Also, we store the gsl field on the heap to avoid accidentally moving the Vector
@@ -130,7 +132,7 @@ impl Drop for Vector {
     }
 }
 
-pub struct Matrix {
+pub(crate) struct Matrix {
     // We own this data on the heap via Box.
     // It is stored as a pointer to avoid aliasing issues when handing out a *mut
     // Also, we store the gsl field on the heap to avoid accidentally moving the Vector
