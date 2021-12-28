@@ -142,13 +142,13 @@ pub struct BSplineEvaluation<const DV: usize> {
 }
 
 impl<const DV: usize> BSplineEvaluation<DV> {
-    pub fn dv_flat(&self) -> &[f64] {
+    pub fn dv_flat<'a>(&'a self) -> &'a [f64] {
         // Safety: [[T; N], [T; N], ...] is equal to [T; M*N]
         // For DV=0 the pointer will still be aligned thanks to Box
         unsafe { std::slice::from_raw_parts(self.dv.as_ptr() as *const _, self.dv.len() * DV) }
     }
 
-    pub fn dv_err_flat(&self) -> &[f64] {
+    pub fn dv_err_flat<'a>(&'a self) -> &'a [f64] {
         // Safety: see dv_flat
         unsafe {
             std::slice::from_raw_parts(self.dv_err.as_ptr() as *const _, self.dv_err.len() * DV)

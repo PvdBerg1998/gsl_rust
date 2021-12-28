@@ -98,7 +98,7 @@ impl FromIterator<f64> for Vector {
 impl Deref for Vector {
     type Target = [f64];
 
-    fn deref(&self) -> &Self::Target {
+    fn deref<'a>(&'a self) -> &'a Self::Target {
         unsafe {
             // It requires unsafe to dereference a possible *mut to our data,
             // so we can assume we have unique access.
@@ -108,7 +108,7 @@ impl Deref for Vector {
 }
 
 impl DerefMut for Vector {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
         unsafe {
             // Same argument as Deref
             &mut *self.data
@@ -251,7 +251,7 @@ impl fmt::Debug for Matrix {
 impl Deref for Matrix {
     type Target = [f64];
 
-    fn deref(&self) -> &Self::Target {
+    fn deref<'a>(&'a self) -> &'a Self::Target {
         unsafe {
             // It requires unsafe to dereference a possible *mut to our data,
             // so we can assume we have unique access.
@@ -261,7 +261,7 @@ impl Deref for Matrix {
 }
 
 impl DerefMut for Matrix {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
         unsafe {
             // Same argument as Deref
             &mut *self.data
