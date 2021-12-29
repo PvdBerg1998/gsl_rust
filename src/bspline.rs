@@ -37,6 +37,9 @@ pub fn fit_bspline(
         if nbreak < 2 {
             return Err(GSLError::Invalid);
         }
+        if b <= a {
+            return Err(GSLError::Domain);
+        }
 
         // Allocate workspace
         let workspace = gsl_bspline_alloc(k as u64, nbreak as u64);

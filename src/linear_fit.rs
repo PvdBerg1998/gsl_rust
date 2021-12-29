@@ -56,9 +56,11 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
         if x.len() == 0 || y.len() == 0 {
             return Err(GSLError::Invalid);
         }
+        if x.len() != y.len() {
+            return Err(GSLError::Invalid);
+        }
 
         // Amount of datapoints
-        assert_eq!(x.len(), y.len());
         let n = x.len();
 
         // Allocate workspace
@@ -100,9 +102,18 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
         let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, n as u64);
         let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
 
+        let mut residuals = Vector::zeroes(x.len());
+        GSLError::from_raw(gsl_multifit_linear_residuals(
+            system.as_gsl(),
+            &gsl_y,
+            c.as_gsl(),
+            residuals.as_gsl_mut(),
+        ))?;
+
         Ok(FitResult {
             params: c.to_boxed_slice(),
             covariance: covariance.to_boxed_slice(),
+            residuals: residuals.to_boxed_slice(),
             residual_squared: chisq,
             mean,
             r_squared: 1.0 - chisq / tss,
@@ -114,6 +125,7 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
 pub struct FitResult {
     pub params: Box<[f64]>,
     pub covariance: Box<[f64]>,
+    pub residuals: Box<[f64]>,
     pub residual_squared: f64,
     pub mean: f64,
     pub r_squared: f64,

@@ -67,9 +67,11 @@ pub fn nonlinear_fit_ext<
         if x.len() == 0 || y.len() == 0 {
             return Err(GSLError::Invalid);
         }
+        if x.len() != y.len() {
+            return Err(GSLError::Invalid);
+        }
 
         // Amount of datapoints
-        assert_eq!(x.len(), y.len());
         let n = x.len() as u64;
 
         // Allocate workspace
@@ -185,6 +187,7 @@ pub fn nonlinear_fit_ext<
             niter: fit_niter,
             neval_f: fit_neval_f,
             initial_residual_squared: chisq0,
+            final_residuals: gsl_vector::to_boxed_slice(fit_residuals),
             final_residual_squared: chisq1,
             mean,
             r_squared: 1.0 - chisq1 / tss,
@@ -307,13 +310,14 @@ pub struct FitCallback<const P: usize> {
     pub residual_squared: f64,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FitResult<const P: usize> {
     pub params: [f64; P],
     pub covariance: [[f64; P]; P],
     pub niter: u64,
     pub neval_f: u64,
     pub initial_residual_squared: f64,
+    pub final_residuals: Box<[f64]>,
     pub final_residual_squared: f64,
     pub mean: f64,
     pub r_squared: f64,
@@ -362,7 +366,7 @@ fn test_nlfit_1() {
         )
         .unwrap();
 
-        dbg!(fit);
+        dbg!(&fit);
 
         approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-3);
         approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-3);
@@ -399,7 +403,7 @@ fn test_nlfit_2() {
     )
     .unwrap();
 
-    dbg!(fit);
+    dbg!(&fit);
 
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-3);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-3);
@@ -440,7 +444,7 @@ fn test_nlfit_3() {
     )
     .unwrap();
 
-    dbg!(fit);
+    dbg!(&fit);
 
     approx::assert_abs_diff_eq!(fit.params[0], a, epsilon = 1.0e-2);
     approx::assert_abs_diff_eq!(fit.params[1], b, epsilon = 1.0e-2);

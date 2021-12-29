@@ -317,6 +317,33 @@ impl gsl_vector {
             data
         }
     }
+
+    /// # Safety
+    /// The gsl_vector is assumed to be valid
+    pub unsafe fn to_boxed_slice(this: *const Self) -> Box<[f64]> {
+        let gsl_vector {
+            size,
+            stride,
+            data: ptr,
+            block: _,
+            owner: _,
+        } = *this;
+        let size = size as usize;
+
+        if stride == 1 {
+            // We can just copy the whole block in one go
+            std::slice::from_raw_parts(ptr, size)
+                .to_owned()
+                .into_boxed_slice()
+        } else {
+            // Data layout is nontrivial
+            let mut data = vec![0.0; size];
+            for i in 0..size {
+                data[i] = gsl_vector_get(this, i as u64);
+            }
+            data.into_boxed_slice()
+        }
+    }
 }
 
 impl From<&[f64]> for gsl_vector {
@@ -444,10 +471,12 @@ fn miri_test_gsl_vector_wrapper() {
         // Convert a Rust array reference to a GSL vector
         let vr = gsl_vector::from(arr.as_slice());
         let _vr = gsl_vector::from(arr.as_slice());
+        let direct_to_box = gsl_vector::to_boxed_slice(&vr);
 
         // Convert back and check equality
         let arr2 = gsl_vector::to_array::<10>(&vr);
         assert_eq!(arr, arr2);
+        assert_eq!(arr.as_slice(), direct_to_box.as_ref());
 
         // Construct the same vector using the Rust wrapper
         let mut v2 = Vector::new(arr);

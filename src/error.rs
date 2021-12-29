@@ -17,6 +17,8 @@
 */
 
 use crate::bindings::*;
+use std::error::Error;
+use std::fmt;
 use std::os::raw::*;
 
 pub type Result<T> = std::result::Result<T, GSLError>;
@@ -177,5 +179,13 @@ impl GSLError {
             GSL_EOF => Err(Self::EOF),
             x => Err(Self::Unknown(x)),
         }
+    }
+}
+
+impl Error for GSLError {}
+
+impl fmt::Display for GSLError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
