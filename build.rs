@@ -1,4 +1,4 @@
-use std::io::Write;
+//use std::io::Write;
 
 fn main() {
     std::env::remove_var("NUM_JOBS");
@@ -39,19 +39,16 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     // This does not get generated unless gsl_vector_double is the only header in wrapper.h
-    // This only happens on my Linux installation (no clue why)
-    if cfg!(unix) {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open("bindings.rs")
-            .unwrap();
-
-        writeln!(
-            &mut f,
-            "extern \"C\" {{\n\
-            \x20   pub fn gsl_vector_sum(a: *const gsl_vector) -> f64;\n\
-            }}"
-        )
-        .unwrap();
-    }
+    // This only happens on my laptop
+    // let mut f = std::fs::OpenOptions::new()
+    //     .append(true)
+    //     .open("bindings.rs")
+    //     .unwrap();
+    // writeln!(
+    //     &mut f,
+    //     "extern \"C\" {{\n\
+    //     \x20   pub fn gsl_vector_sum(a: *const gsl_vector) -> f64;\n\
+    //     }}"
+    // )
+    // .unwrap();
 }

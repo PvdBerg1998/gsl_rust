@@ -23,7 +23,8 @@ use std::os::raw::*;
 
 pub type Result<T> = std::result::Result<T, GSLError>;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GSLError {
     Failure,
     /// iteration has not converged
