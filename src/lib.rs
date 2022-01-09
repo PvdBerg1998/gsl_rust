@@ -23,6 +23,7 @@ use std::os::raw::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub mod bspline;
+pub mod fft;
 pub mod integration;
 pub mod linear_fit;
 pub mod minimizer;

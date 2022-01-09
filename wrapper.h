@@ -1,11 +1,12 @@
 #include <gsl_blas.h>
 #include <gsl_bspline.h>
 #include <gsl_errno.h>
+#include <gsl_fft_real.h>
 #include <gsl_integration.h>
 #include <gsl_matrix.h>
 #include <gsl_min.h>
 #include <gsl_multifit.h>
 #include <gsl_multifit_nlinear.h>
+#include <gsl_statistics_double.h>
 #include <gsl_types.h>
 #include <gsl_vector.h>
-#include <gsl_statistics_double.h>
