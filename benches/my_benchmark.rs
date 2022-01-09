@@ -4,7 +4,7 @@ use gsl_rust::fft::fft64_packed;
 pub fn criterion_benchmark(c: &mut Criterion) {
     // Prepare data
     let y = (0..2u64.pow(20))
-        .map(|x| x as f32 / 2.0f32.powi(18) * std::f32::consts::TAU)
+        .map(|x| x as f64 / 2.0f64.powi(18) * std::f64::consts::TAU)
         .map(|x| x.cos())
         .collect::<Vec<_>>();
     c.bench_function("fft64 2^20", |b| {
