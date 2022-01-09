@@ -9,8 +9,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         .collect::<Vec<_>>();
     c.bench_function("fft64 2^20", |b| {
         b.iter_with_large_drop(|| {
-            let y = y.clone();
-            fft64_packed(y.as_ref())
+            let mut y = y.clone();
+            fft64_packed(y.as_mut())
         })
     });
 }
