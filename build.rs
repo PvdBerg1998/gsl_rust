@@ -10,8 +10,11 @@ fn main() {
     let mut lib = out.clone();
     lib.push("lib");
 
-    let mut headers = out.clone();
-    headers.push("include/gsl");
+    let mut headers1 = out.clone();
+    headers1.push("include");
+
+    let mut headers2 = out.clone();
+    headers2.push("include/gsl");
 
     println!("cargo:rustc-link-search=native={}", lib.display());
     println!("cargo:rustc-link-lib=static=gsl");
@@ -21,7 +24,8 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", headers.display()))
+        .clang_arg(format!("-I{}", headers1.display()))
+        .clang_arg(format!("-I{}", headers2.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .blocklist_item("FP_.*")
         .blocklist_item(".*long_double.*")
