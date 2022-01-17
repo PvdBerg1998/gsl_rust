@@ -18,6 +18,7 @@
 
 use crate::bindings::*;
 use crate::*;
+use drop_guard::guard;
 use linear_fit::*;
 use std::fmt;
 
@@ -42,9 +43,11 @@ pub fn fit_bspline(
         }
 
         // Allocate workspace
-        let workspace = gsl_bspline_alloc(k as u64, nbreak as u64);
+        let workspace = guard(gsl_bspline_alloc(k as u64, nbreak as u64), |workspace| {
+            gsl_bspline_free(workspace);
+        });
         assert!(!workspace.is_null());
-        let ncoeffs = gsl_bspline_ncoeffs(workspace) as usize;
+        let ncoeffs = gsl_bspline_ncoeffs(*workspace) as usize;
 
         // Calculate knots
         // The domain is equal to [x_k, x_{n-k}]
@@ -53,7 +56,7 @@ pub fn fit_bspline(
         // knots(1:k) = a
         // knots(k+1:k+l-1) = a + i*delta, i = 1 .. l - 1
         // knots(n+1:n+k) = b
-        GSLError::from_raw(gsl_bspline_knots_uniform(a, b, workspace))?;
+        GSLError::from_raw(gsl_bspline_knots_uniform(a, b, *workspace))?;
 
         // Cache vector for basis spline values
         let mut b = Vector::zeroes(ncoeffs);
@@ -61,18 +64,23 @@ pub fn fit_bspline(
         // Build the linear system and fit it
         let fit = linear_fit(ncoeffs, x, y, |&x, p| {
             // Evaluate all basis splines at this position and store them in b
-            GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), workspace))?;
+            GSLError::from_raw(gsl_bspline_eval(x, b.as_gsl_mut(), *workspace))?;
             p.copy_from_slice(&b);
             Ok(())
         })?;
 
-        Ok(BSpline { fit, workspace })
+        let raw = *workspace;
+        std::mem::forget(workspace);
+
+        Ok(BSpline {
+            fit,
+            workspace: raw,
+        })
     }
 }
 
 pub struct BSpline {
     pub fit: FitResult,
-    // We own the associated workspace as it contains a nontrivial amount of data
     workspace: *mut gsl_bspline_workspace,
 }
 
@@ -92,8 +100,8 @@ impl BSpline {
 
             let mut y = vec![0.0; x.len()].into_boxed_slice();
             let mut y_err = vec![0.0; x.len()].into_boxed_slice();
-            let mut dv = vec![[0.0; DV]; x.len()].into_boxed_slice();
-            let mut dv_err = vec![[0.0; DV]; x.len()].into_boxed_slice();
+            let mut dv = [(); DV].map(|_| vec![0.0; x.len()].into_boxed_slice());
+            let mut dv_err = [(); DV].map(|_| vec![0.0; x.len()].into_boxed_slice());
 
             for (i, x) in x.iter().copied().enumerate() {
                 // Evaluate all basis splines and their derivatives at this position,
@@ -122,8 +130,8 @@ impl BSpline {
                         b.as_gsl(),
                         &c,
                         &covariance,
-                        &mut dv[i][j],
-                        &mut dv_err[i][j],
+                        &mut dv[j][i],
+                        &mut dv_err[j][i],
                     ))?;
                 }
             }
@@ -142,23 +150,8 @@ impl BSpline {
 pub struct BSplineEvaluation<const DV: usize> {
     pub y: Box<[f64]>,
     pub y_err: Box<[f64]>,
-    pub dv: Box<[[f64; DV]]>,
-    pub dv_err: Box<[[f64; DV]]>,
-}
-
-impl<const DV: usize> BSplineEvaluation<DV> {
-    pub fn dv_flat<'a>(&'a self) -> &'a [f64] {
-        // Safety: [[T; N], [T; N], ...] is equal to [T; M*N]
-        // For DV=0 the pointer will still be aligned thanks to Box
-        unsafe { std::slice::from_raw_parts(self.dv.as_ptr() as *const _, self.dv.len() * DV) }
-    }
-
-    pub fn dv_err_flat<'a>(&'a self) -> &'a [f64] {
-        // Safety: see dv_flat
-        unsafe {
-            std::slice::from_raw_parts(self.dv_err.as_ptr() as *const _, self.dv_err.len() * DV)
-        }
-    }
+    pub dv: [Box<[f64]>; DV],
+    pub dv_err: [Box<[f64]>; DV],
 }
 
 impl fmt::Debug for BSpline {
@@ -214,42 +207,12 @@ fn test_bspline_fit_1() {
     }
 
     // Check derivative
-    let derivative = spline.eval::<1>(&x).unwrap().dv;
-    for (x, [spline_dv]) in x.iter().zip(derivative.iter()) {
+    let derivative = &spline.eval::<1>(&x).unwrap().dv[0];
+    for (x, spline_dv) in x.iter().zip(derivative.iter()) {
         let dv = model_dv(a, b, *x);
         // Derivative amplifies any fitting errors so we have to be a bit more lenient
         approx::assert_abs_diff_eq!(dv, spline_dv, epsilon = 0.3);
     }
-}
-
-#[test]
-fn miri_test_bspline_eval_flat() {
-    let eval = BSplineEvaluation {
-        y: vec![].into_boxed_slice(),
-        y_err: vec![].into_boxed_slice(),
-        dv: vec![[0.0], [1.0], [2.0]].into_boxed_slice(),
-        dv_err: vec![[0.0], [1.0], [2.0]].into_boxed_slice(),
-    };
-    assert_eq!(eval.dv_flat(), &[0.0, 1.0, 2.0]);
-    assert_eq!(eval.dv_err_flat(), &[0.0, 1.0, 2.0]);
-
-    let eval = BSplineEvaluation {
-        y: vec![].into_boxed_slice(),
-        y_err: vec![].into_boxed_slice(),
-        dv: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]].into_boxed_slice(),
-        dv_err: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]].into_boxed_slice(),
-    };
-    assert_eq!(eval.dv_flat(), &[0.0, 0.0, 1.0, 1.0, 2.0, 2.0]);
-    assert_eq!(eval.dv_err_flat(), &[0.0, 0.0, 1.0, 1.0, 2.0, 2.0]);
-
-    let eval = BSplineEvaluation {
-        y: vec![].into_boxed_slice(),
-        y_err: vec![].into_boxed_slice(),
-        dv: vec![[]].into_boxed_slice(),
-        dv_err: vec![[]].into_boxed_slice(),
-    };
-    assert_eq!(eval.dv_flat(), &[]);
-    assert_eq!(eval.dv_err_flat(), &[]);
 }
 
 #[test]
