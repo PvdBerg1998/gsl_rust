@@ -29,6 +29,7 @@ pub fn sort_xy(x: &mut [f64], y: &mut [f64]) {
     }
 }
 
+/// This function assumes the data is sorted.
 pub fn dedup_x<X, Y, F: FnMut(&[Y]) -> Y>(
     x: &[X],
     y: &[Y],
@@ -106,6 +107,8 @@ where
 
 #[test]
 fn test_sort_simple() {
+    disable_error_handler();
+
     let mut x = vec![3.0, 2.0, 1.0];
     let mut y = vec![3.0, 2.0, 1.0];
 
@@ -118,6 +121,8 @@ fn test_sort_simple() {
 
 #[test]
 fn test_dedup() {
+    disable_error_handler();
+
     let x = ['a', 'a', 'a', 'b', 'c', 'd', 'e', 'f', 'f', 'g', 'g', 'h'];
     let y = x;
 
@@ -127,13 +132,3 @@ fn test_dedup() {
     assert_eq!(xdedup.as_ref(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     assert_eq!(ydedup.as_ref(), &['3', 'b', 'c', 'd', 'e', '2', '2', 'h']);
 }
-
-// #[test]
-// fn test_sort_duplicate() {
-//     let mut x = vec![3.0, 1.0, 1.0];
-//     let mut y = vec![3.0, 2.0, 1.0];
-
-//     sort_xy(&mut x, &mut y);
-
-//     dbg!(&x, &y);
-// }

@@ -99,8 +99,8 @@ pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
         ))?;
 
         // Calculate mean and total sum of squares wrt mean
-        let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, n as u64);
-        let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, n as u64, mean);
+        let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, gsl_y.size);
+        let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, gsl_y.size, mean);
 
         let mut residuals = Vector::zeroes(x.len());
         GSLError::from_raw(gsl_multifit_linear_residuals(
