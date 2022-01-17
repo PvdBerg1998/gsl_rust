@@ -34,11 +34,7 @@ pub fn interpolate(
     }
 
     sorting::sort_xy(&mut x, &mut y);
-    let (x, y) = sorting::dedup_x(&x, &y, |bin| unsafe {
-        let gsl_bin = gsl_vector::from(bin);
-        let mean = gsl_stats_mean(gsl_bin.data, gsl_bin.stride, gsl_bin.size);
-        mean
-    })?;
+    let (x, y) = sorting::dedup_x_mean(&x, &y)?;
 
     interpolate_monotonic(algorithm, &x, &y, x_eval)
 }

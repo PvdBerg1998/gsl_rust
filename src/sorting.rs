@@ -29,6 +29,20 @@ pub fn sort_xy(x: &mut [f64], y: &mut [f64]) {
     }
 }
 
+/// This function assumes the data is sorted and uses the mean as a reducing function.
+///
+/// See `dedup_x`.
+pub fn dedup_x_mean<X>(x: &[X], y: &[f64]) -> Result<(Box<[X]>, Box<[f64]>)>
+where
+    X: PartialEq + Clone,
+{
+    dedup_x(x, y, |bin| unsafe {
+        let gsl_bin = gsl_vector::from(bin);
+        let mean = gsl_stats_mean(gsl_bin.data, gsl_bin.stride, gsl_bin.size);
+        mean
+    })
+}
+
 /// This function assumes the data is sorted.
 pub fn dedup_x<X, Y, F: FnMut(&[Y]) -> Y>(
     x: &[X],
