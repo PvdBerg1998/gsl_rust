@@ -30,6 +30,7 @@ pub mod linear_fit;
 pub mod minimizer;
 pub mod nonlinear_fit;
 pub mod sorting;
+pub mod stats;
 
 mod data;
 pub(crate) use data::*;

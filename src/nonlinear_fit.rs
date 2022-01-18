@@ -178,7 +178,7 @@ pub fn nonlinear_fit_ext<
 
         // Calculate mean and total sum of squares wrt mean
         let gsl_y = gsl_vector::from(y);
-        let mean = gsl_stats_mean(gsl_y.data, gsl_y.stride, gsl_y.size);
+        let mean = stats::mean(y);
         let tss = gsl_stats_tss_m(gsl_y.data, gsl_y.stride, gsl_y.size, mean);
 
         let result = FitResult {
