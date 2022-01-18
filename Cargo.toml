@@ -1,9 +1,9 @@
 [package]
-name = "gsl_rust"
 authors = ["Pim van den Berg"]
-license-file = "LICENSE"
-version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
+name = "gsl_rust"
+version = "0.2.0"
 
 [dependencies]
 drop_guard = "0.3.0"
@@ -12,13 +12,13 @@ num-traits = "0.2.14"
 
 [dev-dependencies]
 approx = "0.5"
+criterion = {version = "0.3", features = ["html_reports"]}
 fastrand = "1.6"
-criterion = { version = "0.3", features = ["html_reports"] }
 
 [build-dependencies]
 bindgen = "0.59.2"
 cmake = "0.1"
 
 [[bench]]
-name = "my_benchmark"
 harness = false
+name = "my_benchmark"
