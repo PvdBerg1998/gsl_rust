@@ -82,11 +82,11 @@ pub fn fft64_unpack_iter(half_complex: &[f64]) -> impl Iterator<Item = Complex64
     })
 }
 
-pub fn fft64_unpack(half_complex: &[f64]) -> Box<[Complex64]> {
+pub fn fft64_unpack(half_complex: &[f64]) -> Vec<Complex64> {
     fft64_unpack_iter(half_complex).collect()
 }
 
-pub fn fft64_unpack_norm(half_complex: &[f64]) -> Box<[f64]> {
+pub fn fft64_unpack_norm(half_complex: &[f64]) -> Vec<f64> {
     fft64_unpack_iter(half_complex).map(|z| z.norm()).collect()
 }
 

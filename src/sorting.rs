@@ -32,7 +32,7 @@ pub fn sort_xy(x: &mut [f64], y: &mut [f64]) {
 /// This function assumes the data is sorted and uses the mean as a reducing function.
 ///
 /// See `dedup_x`.
-pub fn dedup_x_mean<X>(x: &[X], y: &[f64]) -> Result<(Box<[X]>, Box<[f64]>)>
+pub fn dedup_x_mean<X>(x: &[X], y: &[f64]) -> Result<(Vec<X>, Vec<f64>)>
 where
     X: PartialEq + Clone,
 {
@@ -48,7 +48,7 @@ pub fn dedup_x<X, Y, F: FnMut(&[Y]) -> Y>(
     x: &[X],
     y: &[Y],
     mut reduce: F,
-) -> Result<(Box<[X]>, Box<[Y]>)>
+) -> Result<(Vec<X>, Vec<Y>)>
 where
     X: PartialEq + Clone,
     Y: Clone,
@@ -62,7 +62,7 @@ where
 
     // Handle edge cases
     if n == 0 {
-        return Ok((Box::new([]), Box::new([])));
+        return Ok((vec![], vec![]));
     }
 
     // Allocate buffer, with enough capacity to host x/y if they have no duplicates
@@ -116,7 +116,7 @@ where
         buf_y.extend_from_slice(&y[block_start..]);
     }
 
-    Ok((buf_x.into_boxed_slice(), buf_y.into_boxed_slice()))
+    Ok((buf_x, buf_y))
 }
 
 #[test]
@@ -143,6 +143,6 @@ fn test_dedup() {
     let (xdedup, ydedup) = dedup_x(&x, &y, |set| (set.len() as u8 + '0' as u8) as char).unwrap();
 
     dbg!(&xdedup, &ydedup);
-    assert_eq!(xdedup.as_ref(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
-    assert_eq!(ydedup.as_ref(), &['3', 'b', 'c', 'd', 'e', '2', '2', 'h']);
+    assert_eq!(&xdedup, &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+    assert_eq!(&ydedup, &['3', 'b', 'c', 'd', 'e', '2', '2', 'h']);
 }
