@@ -1,9 +1,13 @@
-//use std::io::Write;
-
 fn main() {
+    println!("cargo:rerun-if-changed=wrapper.h");
+
     std::env::remove_var("NUM_JOBS");
-    let out = cmake::Config::new(std::fs::canonicalize("./gsl").unwrap())
-        .define("NO_AMPL_BINDINGS", "")
+    let mut build = cmake::Config::new("./gsl");
+
+    let out = build
+        .define("NO_AMPL_BINDINGS", "1")
+        .define("GSL_DISABLE_TESTS", "1")
+        .always_configure(true)
         .profile("Release")
         .build();
 
@@ -19,8 +23,6 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib.display());
     println!("cargo:rustc-link-lib=static=gsl");
     println!("cargo:rustc-link-lib=static=gslcblas");
-
-    println!("cargo:rerun-if-changed=wrapper.h");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
