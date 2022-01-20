@@ -140,10 +140,11 @@ fn test_linear_fit() {
     let x_eval = [0.5, 1.5, 2.5, 3.5];
     let expected = [1.0, 3.0, 5.0, 7.0];
 
-    for (y_eval, y_expected) in interpolate_monotonic(Algorithm::Linear, &x, &y, &x_eval)
-        .unwrap()
-        .iter()
-        .zip(expected.iter())
+    for (y_eval, y_expected) in
+        interpolate_monotonic(Algorithm::Linear, Derivative::None, &x, &y, &x_eval)
+            .unwrap()
+            .iter()
+            .zip(expected.iter())
     {
         approx::assert_abs_diff_eq!(y_eval, y_expected);
     }
@@ -154,8 +155,15 @@ fn test_invalid_params() {
     disable_error_handler();
 
     // No data
-    interpolate_monotonic(Algorithm::Linear, &[], &[], &[0.0]).unwrap_err();
+    interpolate_monotonic(Algorithm::Linear, Derivative::None, &[], &[], &[0.0]).unwrap_err();
 
     // Outside domain
-    interpolate_monotonic(Algorithm::Linear, &[0.0, 1.0, 2.0], &[0.0; 3], &[100.0]).unwrap_err();
+    interpolate_monotonic(
+        Algorithm::Linear,
+        Derivative::None,
+        &[0.0, 1.0, 2.0],
+        &[0.0; 3],
+        &[100.0],
+    )
+    .unwrap_err();
 }
