@@ -25,10 +25,11 @@ use drop_guard::guard;
 /// For more control, use `interpolate_monotonic` and perform sorting/deduplication manually.
 pub fn interpolate(
     algorithm: Algorithm,
-    mut x: Box<[f64]>,
-    mut y: Box<[f64]>,
+    derivative: Derivative,
+    mut x: Vec<f64>,
+    mut y: Vec<f64>,
     x_eval: &[f64],
-) -> Result<Box<[f64]>> {
+) -> Result<Vec<f64>> {
     if x.len() != y.len() {
         return Err(GSLError::Invalid);
     }
@@ -36,16 +37,17 @@ pub fn interpolate(
     sorting::sort_xy(&mut x, &mut y);
     let (x, y) = sorting::dedup_x_mean(&x, &y)?;
 
-    interpolate_monotonic(algorithm, &x, &y, x_eval)
+    interpolate_monotonic(algorithm, derivative, &x, &y, x_eval)
 }
 
 /// This function assumes the data is sorted and free of duplicates.
 pub fn interpolate_monotonic(
     algorithm: Algorithm,
+    derivative: Derivative,
     x: &[f64],
     y: &[f64],
     x_eval: &[f64],
-) -> Result<Box<[f64]>> {
+) -> Result<Vec<f64>> {
     unsafe {
         if x.len() != y.len() {
             return Err(GSLError::Invalid);
@@ -83,14 +85,33 @@ pub fn interpolate_monotonic(
             .iter()
             .map(|&x_eval| {
                 let mut y_eval = 0.0;
-                GSLError::from_raw(gsl_interp_eval_e(
-                    *workspace,
-                    x.as_ptr(),
-                    y.as_ptr(),
-                    x_eval,
-                    *accel,
-                    &mut y_eval,
-                ))
+
+                GSLError::from_raw(match derivative {
+                    Derivative::None => gsl_interp_eval_e(
+                        *workspace,
+                        x.as_ptr(),
+                        y.as_ptr(),
+                        x_eval,
+                        *accel,
+                        &mut y_eval,
+                    ),
+                    Derivative::First => gsl_interp_eval_deriv_e(
+                        *workspace,
+                        x.as_ptr(),
+                        y.as_ptr(),
+                        x_eval,
+                        *accel,
+                        &mut y_eval,
+                    ),
+                    Derivative::Second => gsl_interp_eval_deriv2_e(
+                        *workspace,
+                        x.as_ptr(),
+                        y.as_ptr(),
+                        x_eval,
+                        *accel,
+                        &mut y_eval,
+                    ),
+                })
                 .map(|_| y_eval)
             })
             .collect()
@@ -101,6 +122,13 @@ pub fn interpolate_monotonic(
 pub enum Algorithm {
     Linear,
     Steffen,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Derivative {
+    None,
+    First,
+    Second,
 }
 
 #[test]
