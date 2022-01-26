@@ -20,10 +20,13 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn median(width: usize, data: &[f64]) -> Result<Vec<f64>> {
+pub fn median(width: usize, data: &mut [f64]) -> Result<()> {
     unsafe {
         if width == 0 {
             return Err(GSLError::Invalid);
+        }
+        if data.is_empty() {
+            return Ok(());
         }
 
         let workspace = guard(gsl_filter_median_alloc(width as u64), |workspace| {
@@ -31,16 +34,67 @@ pub fn median(width: usize, data: &[f64]) -> Result<Vec<f64>> {
         });
         assert!(!workspace.is_null());
 
-        let gsl_in = gsl_vector::from(&*data);
-        let mut gsl_out = Vector::zeroes(data.len());
-
+        let mut gsl_data = gsl_vector::from(&*data);
         gsl_filter_median(
             gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
-            &gsl_in,
-            gsl_out.as_gsl_mut(),
+            &gsl_data,
+            &mut gsl_data,
             *workspace,
         );
 
-        Ok(gsl_out.to_vec())
+        Ok(())
     }
+}
+
+/// Impulse filter
+/// See https://www.gnu.org/software/gsl/doc/html/filter.html#impulse-detection-filter
+///
+/// Tuning parameter `t`:
+/// - `t = 0`: equal to median filter
+/// - `t = inf`: equal to identity filter
+///
+/// Returns: amount of outliers filtered
+pub fn impulse(width: usize, t: f64, scale: ImpulseFilterScale, data: &mut [f64]) -> Result<usize> {
+    unsafe {
+        if width == 0 {
+            return Err(GSLError::Invalid);
+        }
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let workspace = guard(gsl_filter_impulse_alloc(width as u64), |workspace| {
+            gsl_filter_impulse_free(workspace);
+        });
+        assert!(!workspace.is_null());
+
+        let mut gsl_data = gsl_vector::from(&*data);
+        let mut x_median = Vector::zeroes(data.len());
+        let mut x_sigma = Vector::zeroes(data.len());
+        let mut outliers = 0;
+
+        gsl_filter_impulse(
+            gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
+            scale as i32,
+            t,
+            &gsl_data,
+            &mut gsl_data,
+            x_median.as_gsl_mut(),
+            x_sigma.as_gsl_mut(),
+            &mut outliers,
+            std::ptr::null_mut(),
+            *workspace,
+        );
+
+        Ok(outliers as usize)
+    }
+}
+
+#[repr(i32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ImpulseFilterScale {
+    MedianAbsoluteDeviation = gsl_filter_scale_t_GSL_FILTER_SCALE_MAD as i32,
+    InterQuartileRange = gsl_filter_scale_t_GSL_FILTER_SCALE_IQR as i32,
+    SnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_SN as i32,
+    QnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_QN as i32,
 }
