@@ -1,15 +1,21 @@
+use std::env;
+use std::path::PathBuf;
+
 fn main() {
+    std::env::remove_var("NUM_JOBS");
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    std::env::remove_var("NUM_JOBS");
-    let mut build = cmake::Config::new("./gsl");
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let out = build
-        .define("NO_AMPL_BINDINGS", "1")
-        .define("GSL_DISABLE_TESTS", "1")
-        .always_configure(true)
-        .profile("Release")
-        .build();
+    // I'm tired of Cargo rebuilding GSL
+    if !out.join("include/gsl").exists() {
+        cmake::Config::new("./gsl")
+            .define("NO_AMPL_BINDINGS", "1")
+            .define("GSL_DISABLE_TESTS", "1")
+            .always_configure(true)
+            .profile("Release")
+            .build();
+    }
 
     let mut lib = out.clone();
     lib.push("lib");
