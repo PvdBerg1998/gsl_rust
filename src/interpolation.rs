@@ -70,9 +70,12 @@ pub fn interpolate_monotonic(
         let workspace = guard(gsl_interp_alloc(algorithm, n as u64), |workspace| {
             gsl_interp_free(workspace);
         });
+        assert!(!workspace.is_null());
+
         let accel = guard(gsl_interp_accel_alloc(), |accel| {
             gsl_interp_accel_free(accel);
         });
+        assert!(!accel.is_null());
 
         GSLError::from_raw(gsl_interp_init(
             *workspace,

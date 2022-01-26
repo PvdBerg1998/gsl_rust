@@ -2,6 +2,7 @@
 #include <gsl_bspline.h>
 #include <gsl_errno.h>
 #include <gsl_fft_real.h>
+#include <gsl_filter.h>
 #include <gsl_integration.h>
 #include <gsl_interp.h>
 #include <gsl_matrix.h>

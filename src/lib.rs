@@ -24,6 +24,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub mod bspline;
 pub mod fft;
+pub mod filter;
 pub mod integration;
 pub mod interpolation;
 pub mod linear_fit;

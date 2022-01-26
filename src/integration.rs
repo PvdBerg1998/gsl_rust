@@ -71,16 +71,15 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
     }
 }
 
-#[cfg_attr(windows, repr(i32))]
-#[cfg_attr(not(windows), repr(u32))]
+#[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GaussKronrodRule {
-    Gauss15 = GSL_INTEG_GAUSS15,
-    Gauss21 = GSL_INTEG_GAUSS21,
-    Gauss31 = GSL_INTEG_GAUSS31,
-    Gauss41 = GSL_INTEG_GAUSS41,
-    Gauss51 = GSL_INTEG_GAUSS51,
-    Gauss61 = GSL_INTEG_GAUSS61,
+    Gauss15 = GSL_INTEG_GAUSS15 as u32,
+    Gauss21 = GSL_INTEG_GAUSS21 as u32,
+    Gauss31 = GSL_INTEG_GAUSS31 as u32,
+    Gauss41 = GSL_INTEG_GAUSS41 as u32,
+    Gauss51 = GSL_INTEG_GAUSS51 as u32,
+    Gauss61 = GSL_INTEG_GAUSS61 as u32,
 }
 
 #[test]
