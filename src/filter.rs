@@ -20,7 +20,7 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn median_filter(width: usize, data: &mut [f64]) -> Result<()> {
+pub fn median(width: usize, data: &[f64]) -> Result<Vec<f64>> {
     unsafe {
         if width == 0 {
             return Err(GSLError::Invalid);
@@ -31,15 +31,16 @@ pub fn median_filter(width: usize, data: &mut [f64]) -> Result<()> {
         });
         assert!(!workspace.is_null());
 
-        // In-place mutation is allowed
-        let mut gsl_data = gsl_vector::from(&*data);
+        let gsl_in = gsl_vector::from(&*data);
+        let mut gsl_out = Vector::zeroes(data.len());
+
         gsl_filter_median(
             gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
-            &gsl_data,
-            &mut gsl_data,
+            &gsl_in,
+            gsl_out.as_gsl_mut(),
             *workspace,
         );
 
-        Ok(())
+        Ok(gsl_out.to_vec())
     }
 }

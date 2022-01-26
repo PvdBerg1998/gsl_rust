@@ -28,7 +28,6 @@ fn main() {
         .header("wrapper.h")
         .clang_arg(format!("-I{}", headers1.display()))
         .clang_arg(format!("-I{}", headers2.display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .blocklist_item("FP_.*")
         .blocklist_item(".*long_double.*")
         .allowlist_function("gsl.*")
