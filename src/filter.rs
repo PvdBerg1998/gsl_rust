@@ -78,7 +78,7 @@ pub fn impulse(width: usize, t: f64, scale: ImpulseFilterScale, data: &mut [f64]
 
         gsl_filter_impulse(
             gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
-            scale as i32,
+            scale as _,
             t,
             &gsl_data,
             &mut gsl_data,
@@ -93,11 +93,11 @@ pub fn impulse(width: usize, t: f64, scale: ImpulseFilterScale, data: &mut [f64]
     }
 }
 
-#[repr(i32)]
+#[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ImpulseFilterScale {
-    MedianAbsoluteDeviation = gsl_filter_scale_t_GSL_FILTER_SCALE_MAD as i32,
-    InterQuartileRange = gsl_filter_scale_t_GSL_FILTER_SCALE_IQR as i32,
-    SnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_SN as i32,
-    QnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_QN as i32,
+    MedianAbsoluteDeviation = gsl_filter_scale_t_GSL_FILTER_SCALE_MAD as u32,
+    InterQuartileRange = gsl_filter_scale_t_GSL_FILTER_SCALE_IQR as u32,
+    SnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_SN as u32,
+    QnStatistic = gsl_filter_scale_t_GSL_FILTER_SCALE_QN as u32,
 }

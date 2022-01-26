@@ -61,7 +61,7 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
             epsabs,
             epsrel,
             workspace_size as u64,
-            rule as c_int,
+            rule as _,
             *workspace,
             &mut result,
             &mut final_abserr,
