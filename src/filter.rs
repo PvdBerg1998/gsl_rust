@@ -62,6 +62,9 @@ pub fn impulse(width: usize, t: f64, scale: ImpulseFilterScale, data: &mut [f64]
         if data.is_empty() {
             return Ok(0);
         }
+        if t < 0.0 {
+            return Err(GSLError::Invalid);
+        }
 
         let workspace = guard(gsl_filter_impulse_alloc(width as u64), |workspace| {
             gsl_filter_impulse_free(workspace);
