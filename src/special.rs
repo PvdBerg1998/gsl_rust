@@ -94,7 +94,7 @@ pub fn hurwitz_zeta_complex(s: Complex64, a: f64) -> Result<Complex64> {
         ((0.5 * imz * log).cos() * (imz * t).cosh() * (rez * t).sin()
             + (rez * t).cos() * (0.5 * imz * log).sin() * (imz * t).sinh())
             / (((std::f64::consts::TAU * x).exp() - 1.0)
-                * ((a.powi(2) + x.powi(2)).powf(rez / 2.0)))
+                * ((a.powi(2) + x.powi(2)).powf(0.5 * rez)))
     };
 
     let im_integrand = |x: f64| -> f64 {
@@ -107,7 +107,7 @@ pub fn hurwitz_zeta_complex(s: Complex64, a: f64) -> Result<Complex64> {
         (-(0.5 * imz * log).sin() * (imz * t).cosh() * (rez * t).sin()
             + (rez * t).cos() * (0.5 * imz * log).cos() * (imz * t).sinh())
             / (((std::f64::consts::TAU * x).exp() - 1.0)
-                * ((a.powi(2) + x.powi(2)).powf(rez / 2.0)))
+                * ((a.powi(2) + x.powi(2)).powf(0.5 * rez)))
     };
 
     let re_part2 = 2.0 * integration::qagiu(0.0, re_integrand)?;
