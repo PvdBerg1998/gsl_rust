@@ -29,6 +29,19 @@ pub fn gamma(x: f64) -> Result<ValWithError<f64>> {
     }
 }
 
+pub fn ln_gamma_complex(z: Complex64) -> Result<ValWithError<Complex64>> {
+    unsafe {
+        let mut ln_r = gsl_sf_result { val: 0.0, err: 0.0 };
+        let mut arg = gsl_sf_result { val: 0.0, err: 0.0 };
+        GSLError::from_raw(gsl_sf_lngamma_complex_e(z.re, z.im, &mut ln_r, &mut arg))?;
+
+        Ok(ValWithError {
+            val: Complex64::from_polar(ln_r.val, arg.val),
+            err: Complex64::from_polar(ln_r.err, arg.err),
+        })
+    }
+}
+
 pub fn gamma_complex(z: Complex64) -> Result<ValWithError<Complex64>> {
     unsafe {
         let mut ln_r = gsl_sf_result { val: 0.0, err: 0.0 };
