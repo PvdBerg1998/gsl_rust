@@ -82,6 +82,54 @@ pub enum GaussKronrodRule {
     Gauss61 = GSL_INTEG_GAUSS61 as u32,
 }
 
+pub fn qagiu<F: FnMut(f64) -> f64>(a: f64, f: F) -> Result<f64> {
+    qagiu_ext(32, a, 1.0e-9, 0.0, f)
+}
+
+pub fn qagiu_ext<F: FnMut(f64) -> f64>(
+    workspace_size: usize,
+    a: f64,
+    epsabs: f64,
+    epsrel: f64,
+    mut f: F,
+) -> Result<f64> {
+    unsafe {
+        if workspace_size == 0 {
+            return Err(GSLError::Invalid);
+        }
+
+        let workspace = guard(
+            gsl_integration_workspace_alloc(workspace_size as u64),
+            |workspace| {
+                gsl_integration_workspace_free(workspace);
+            },
+        );
+        assert!(!workspace.is_null());
+
+        let gsl_f = gsl_function_struct {
+            function: Some(trampoline::<F>),
+            params: &mut f as *mut _ as *mut _,
+        };
+
+        let mut result = 0.0f64;
+        let mut final_abserr = 0.0f64;
+
+        // Mutability: gsl_f is not actually modified, the header definition is poor.
+        GSLError::from_raw(gsl_integration_qagiu(
+            &gsl_f as *const _ as *mut _,
+            a,
+            epsabs,
+            epsrel,
+            workspace_size as u64,
+            *workspace,
+            &mut result,
+            &mut final_abserr,
+        ))?;
+
+        Ok(result)
+    }
+}
+
 #[test]
 fn test_qag65() {
     disable_error_handler();
@@ -92,6 +140,17 @@ fn test_qag65() {
             + x)
         .unwrap(),
         0.75,
+        epsilon = 1.0e-6
+    );
+}
+
+#[test]
+fn test_qagiu() {
+    disable_error_handler();
+
+    approx::assert_abs_diff_eq!(
+        (qagiu(0.0, |x| { (-x.powi(2)).exp() }).unwrap() * 2.0).powi(2),
+        std::f64::consts::PI,
         epsilon = 1.0e-6
     );
 }

@@ -13,3 +13,4 @@
 #include <gsl_statistics_double.h>
 #include <gsl_types.h>
 #include <gsl_vector.h>
+#include <gsl_sf.h>
