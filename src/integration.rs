@@ -20,7 +20,7 @@ use crate::bindings::*;
 use crate::*;
 use drop_guard::guard;
 
-pub fn qag<F: FnMut(f64) -> f64>(a: f64, b: f64, f: F) -> Result<f64> {
+pub fn qag<F: FnMut(f64) -> f64>(a: f64, b: f64, f: F) -> Result<ValWithError<f64>> {
     qag_ext(16, a, b, 1.0e-9, 0.0, GaussKronrodRule::Gauss15, f)
 }
 
@@ -32,7 +32,7 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
     epsrel: f64,
     rule: GaussKronrodRule,
     mut f: F,
-) -> Result<f64> {
+) -> Result<ValWithError<f64>> {
     unsafe {
         if workspace_size == 0 {
             return Err(GSLError::Invalid);
@@ -67,7 +67,10 @@ pub fn qag_ext<F: FnMut(f64) -> f64>(
             &mut final_abserr,
         ))?;
 
-        Ok(result)
+        Ok(ValWithError {
+            val: result,
+            err: final_abserr,
+        })
     }
 }
 
@@ -82,7 +85,7 @@ pub enum GaussKronrodRule {
     Gauss61 = GSL_INTEG_GAUSS61 as u32,
 }
 
-pub fn qagiu<F: FnMut(f64) -> f64>(a: f64, f: F) -> Result<f64> {
+pub fn qagiu<F: FnMut(f64) -> f64>(a: f64, f: F) -> Result<ValWithError<f64>> {
     qagiu_ext(32, a, 1.0e-9, 0.0, f)
 }
 
@@ -92,7 +95,7 @@ pub fn qagiu_ext<F: FnMut(f64) -> f64>(
     epsabs: f64,
     epsrel: f64,
     mut f: F,
-) -> Result<f64> {
+) -> Result<ValWithError<f64>> {
     unsafe {
         if workspace_size == 0 {
             return Err(GSLError::Invalid);
@@ -126,7 +129,10 @@ pub fn qagiu_ext<F: FnMut(f64) -> f64>(
             &mut final_abserr,
         ))?;
 
-        Ok(result)
+        Ok(ValWithError {
+            val: result,
+            err: final_abserr,
+        })
     }
 }
 
@@ -138,7 +144,8 @@ fn test_qag65() {
         qag_ext(4, 0.0, 1.0, 1.0e-6, 0.0, GaussKronrodRule::Gauss61, |x| x
             .powi(3)
             + x)
-        .unwrap(),
+        .unwrap()
+        .val,
         0.75,
         epsilon = 1.0e-6
     );
@@ -149,7 +156,7 @@ fn test_qagiu() {
     disable_error_handler();
 
     approx::assert_abs_diff_eq!(
-        (qagiu(0.0, |x| { (-x.powi(2)).exp() }).unwrap() * 2.0).powi(2),
+        (qagiu(0.0, |x| { (-x.powi(2)).exp() }).unwrap().val * 2.0).powi(2),
         std::f64::consts::PI,
         epsilon = 1.0e-6
     );

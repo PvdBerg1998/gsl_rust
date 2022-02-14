@@ -21,55 +21,36 @@ use crate::*;
 use num_complex::Complex64;
 use num_traits::One;
 
-pub fn gamma(x: f64) -> Result<f64> {
+pub fn gamma(x: f64) -> Result<ValWithError<f64>> {
     unsafe {
         let mut result = gsl_sf_result { val: 0.0, err: 0.0 };
         GSLError::from_raw(gsl_sf_gamma_e(x, &mut result))?;
-        Ok(result.val)
+        Ok(result.into())
     }
 }
 
-pub fn gamma_complex(z: Complex64) -> Result<Complex64> {
+pub fn gamma_complex(z: Complex64) -> Result<ValWithError<Complex64>> {
     unsafe {
         let mut ln_r = gsl_sf_result { val: 0.0, err: 0.0 };
         let mut arg = gsl_sf_result { val: 0.0, err: 0.0 };
         GSLError::from_raw(gsl_sf_lngamma_complex_e(z.re, z.im, &mut ln_r, &mut arg))?;
-        Ok(Complex64::from_polar(ln_r.val.exp(), arg.val))
+
+        Ok(ValWithError {
+            val: Complex64::from_polar(ln_r.val.exp(), arg.val),
+            err: Complex64::from_polar(ln_r.err.exp(), arg.err),
+        })
     }
 }
 
-pub fn hurwitz_zeta(s: f64, a: f64) -> Result<f64> {
+pub fn hurwitz_zeta(s: f64, a: f64) -> Result<ValWithError<f64>> {
     unsafe {
         let mut result = gsl_sf_result { val: 0.0, err: 0.0 };
         GSLError::from_raw(gsl_sf_hzeta_e(s, a, &mut result))?;
-        Ok(result.val)
+        Ok(result.into())
     }
 }
 
-// This shows very poor convengence
-// pub fn hurwitz_zeta_complex(s: Complex64, a: f64, n: usize) -> Result<Complex64> {
-//     if s == Complex64::one() {
-//         return Err(GSLError::Domain);
-//     }
-//     if s.re <= 0.0 {
-//         return Err(GSLError::Domain);
-//     }
-//     if a <= 0.0 {
-//         return Err(GSLError::Domain);
-//     }
-
-//     let a = Complex64::from(a);
-
-//     let mut acc = Complex64::zero();
-//     for k in 0..=n {
-//         acc += (Complex64::from(k as f64) + a).powc(-s);
-//     }
-//     acc += (Complex64::from(n as f64) + a).powc(Complex64::one() - s) / (s - Complex64::one());
-
-//     Ok(acc)
-// }
-
-pub fn hurwitz_zeta_complex(s: Complex64, a: f64) -> Result<Complex64> {
+pub fn hurwitz_zeta_complex(s: Complex64, a: f64) -> Result<ValWithError<Complex64>> {
     if s == Complex64::one() {
         return Err(GSLError::Domain);
     }
@@ -110,11 +91,16 @@ pub fn hurwitz_zeta_complex(s: Complex64, a: f64) -> Result<Complex64> {
                 * ((a.powi(2) + x.powi(2)).powf(0.5 * rez)))
     };
 
-    let re_part2 = 2.0 * integration::qagiu(0.0, re_integrand)?;
-    let im_part2 = 2.0 * integration::qagiu(0.0, im_integrand)?;
-    let part2 = Complex64::new(re_part2, im_part2);
+    let re_part2 = integration::qagiu(0.0, re_integrand)?;
+    let im_part2 = integration::qagiu(0.0, im_integrand)?;
 
-    Ok(part1 + part2)
+    let part2 = Complex64::new(2.0 * re_part2.val, 2.0 * im_part2.val);
+    let err = Complex64::new(2.0 * re_part2.err, 2.0 * im_part2.err);
+
+    Ok(ValWithError {
+        val: part1 + part2,
+        err,
+    })
 }
 
 #[test]
@@ -122,18 +108,18 @@ fn test_gamma() {
     disable_error_handler();
 
     approx::assert_abs_diff_eq!(
-        gamma(5.0).unwrap(),
-        gamma_complex(Complex64::from(5.0)).unwrap().re,
+        gamma(5.0).unwrap().val,
+        gamma_complex(Complex64::from(5.0)).unwrap().val.re,
         epsilon = 1.0e-9
     );
 
     approx::assert_abs_diff_eq!(
-        gamma_complex(Complex64::new(1.0, 1.0)).unwrap().re,
+        gamma_complex(Complex64::new(1.0, 1.0)).unwrap().val.re,
         0.49801566811835,
         epsilon = 1.0e-9
     );
     approx::assert_abs_diff_eq!(
-        gamma_complex(Complex64::new(1.0, 1.0)).unwrap().im,
+        gamma_complex(Complex64::new(1.0, 1.0)).unwrap().val.im,
         -0.1549498283018,
         epsilon = 1.0e-9
     );
@@ -149,8 +135,8 @@ fn test_hurwitz_zeta_compare_rs_gsl() {
         for a in 1..10 {
             let a = a as f64;
 
-            let rust_zeta = hurwitz_zeta_complex(Complex64::from(s), a).unwrap().re;
-            let gsl_zeta = hurwitz_zeta(s, a).unwrap();
+            let rust_zeta = hurwitz_zeta_complex(Complex64::from(s), a).unwrap().val.re;
+            let gsl_zeta = hurwitz_zeta(s, a).unwrap().val;
 
             approx::assert_abs_diff_eq!(rust_zeta, gsl_zeta, epsilon = 1.0e-9);
         }
@@ -161,7 +147,9 @@ fn test_hurwitz_zeta_compare_rs_gsl() {
 fn test_hurwitz_zeta() {
     disable_error_handler();
 
-    let z = hurwitz_zeta_complex(Complex64::new(5.0, 5.0), 1.5).unwrap();
+    let z = hurwitz_zeta_complex(Complex64::new(5.0, 5.0), 1.5)
+        .unwrap()
+        .val;
 
     // Impressive accuracy of the approximation!
     approx::assert_abs_diff_eq!(z.re, -0.057538922474198148085);

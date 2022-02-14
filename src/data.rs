@@ -424,6 +424,21 @@ impl<const M: usize, const N: usize> From<&[[f64; N]; M]> for gsl_matrix {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ValWithError<T> {
+    pub val: T,
+    pub err: T,
+}
+
+impl From<gsl_sf_result> for ValWithError<f64> {
+    fn from(val: gsl_sf_result) -> Self {
+        ValWithError {
+            val: val.val,
+            err: val.err,
+        }
+    }
+}
+
 #[test]
 fn test_gsl_vector_wrapper() {
     unsafe {
