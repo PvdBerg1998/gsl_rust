@@ -35,7 +35,7 @@ pub mod special;
 pub mod stats;
 
 mod data;
-pub(crate) use data::*;
+pub use data::*;
 mod error;
 pub use error::*;
 
