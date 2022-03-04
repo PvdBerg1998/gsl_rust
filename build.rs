@@ -45,21 +45,9 @@ fn main() {
         .generate()
         .expect("Unable to generate bindings");
 
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let out = out.join("bindings.rs");
     bindings
-        .write_to_file("bindings.rs")
+        .write_to_file(out)
         .expect("Couldn't write bindings!");
-
-    // This does not get generated unless gsl_vector_double is the only header in wrapper.h
-    // This only happens on my laptop
-    // let mut f = std::fs::OpenOptions::new()
-    //     .append(true)
-    //     .open("bindings.rs")
-    //     .unwrap();
-    // writeln!(
-    //     &mut f,
-    //     "extern \"C\" {{\n\
-    //     \x20   pub fn gsl_vector_sum(a: *const gsl_vector) -> f64;\n\
-    //     }}"
-    // )
-    // .unwrap();
 }
