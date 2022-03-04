@@ -46,7 +46,7 @@ pub mod bindings {
     #![allow(non_snake_case)]
     #![allow(deref_nullptr)]
 
-    include!("../bindings.rs");
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
 pub fn disable_error_handler() {
