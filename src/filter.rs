@@ -36,7 +36,7 @@ pub fn median(width: usize, data: &mut [f64]) -> Result<()> {
 
         let mut gsl_data = gsl_vector::from(&*data);
         gsl_filter_median(
-            gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
+            gsl_filter_end_t_GSL_FILTER_END_TRUNCATE,
             &gsl_data,
             &mut gsl_data,
             *workspace,
@@ -77,7 +77,7 @@ pub fn impulse(width: usize, t: f64, scale: ImpulseFilterScale, data: &mut [f64]
         let mut outliers = 0;
 
         gsl_filter_impulse(
-            gsl_filter_end_t_GSL_FILTER_END_PADVALUE,
+            gsl_filter_end_t_GSL_FILTER_END_TRUNCATE,
             scale as _,
             t,
             &gsl_data,

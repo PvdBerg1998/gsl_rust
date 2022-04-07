@@ -5,7 +5,7 @@ categories = ["algorithms", "mathematics", "science", "api-bindings"]
 edition = "2021"
 license-file = "LICENSE"
 name = "gsl_rust"
-version = "0.7.2"
+version = "0.7.3"
 repository = "https://github.com/PvdBerg1998/gsl_rust"
 
 [dependencies]
