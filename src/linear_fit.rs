@@ -43,6 +43,14 @@ pub fn linear_fit_p<X, F: FnMut(&X) -> Result<[f64; P]>, const P: usize>(
     })
 }
 
+pub fn polynomial_basis<const P: usize>(x: &f64) -> Result<[f64; P]> {
+    let mut basis = [*x; P];
+    for i in 0..P {
+        basis[i] = basis[i].powi(i as i32);
+    }
+    Ok(basis)
+}
+
 pub fn linear_fit<X, F: FnMut(&X, &mut [f64]) -> Result<()>>(
     p: usize,
     x: &[X],
@@ -167,11 +175,13 @@ fn test_fit_1() {
     let x = (0..100).map(|x| x as f64 / 10.0).collect::<Vec<_>>();
     let y = x.iter().map(|&x| model(a, b, c, x)).collect::<Vec<_>>();
 
-    let fit = linear_fit(3, &x, &y, |&x, p| {
-        p.copy_from_slice(&[1.0, x, x.powi(2)]);
-        Ok(())
-    })
-    .unwrap();
+    // let fit = linear_fit(3, &x, &y, |&x, p| {
+    //     p.copy_from_slice(&[1.0, x, x.powi(2)]);
+    //     Ok(())
+    // })
+    // .unwrap();
+
+    let fit = linear_fit_p(&x, &y, polynomial_basis::<3>).unwrap();
 
     dbg!(&fit);
 
